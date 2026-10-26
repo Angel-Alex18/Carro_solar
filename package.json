@@ -1,0 +1,23 @@
+{
+  "name": "carro_solar",
+  "version": "1.0.0",
+  "description": "Crear un simulador de como armar un carro de carreras desde 0",
+  "homepage": "https://github.com/Angel-Alex18/Carro_solar#readme",
+  "bugs": {
+    "url": "https://github.com/Angel-Alex18/Carro_solar/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Angel-Alex18/Carro_solar.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^9.32.0"
+  }
+}
