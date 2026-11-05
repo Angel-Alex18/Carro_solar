@@ -13,6 +13,13 @@ import {
   HighlightLayer
 } from "@babylonjs/core";
 import "@babylonjs/loaders";
+import { createSafetyAndTools } from "./piezas/safety-tools.js";
+import {
+  createSolarPart,
+  createAllSolarParts,
+  SOLAR_PARTS_META,
+  SOLAR_CATEGORIES
+} from "./piezas/solar-piezas.js";
 
 const canvas = document.getElementById("renderCanvas");
 const engine = new Engine(canvas, true);
@@ -340,6 +347,34 @@ const createScene = () => {
   const posCarroBase = new Vector3(0, 0.35, zCarro);
   const componentesVehiculo = [];
 
+  // ==========================================
+  // 7.5. PIEZAS DE SEGURIDAD Y HERRAMIENTAS (safety-tools.js)
+  // ==========================================
+  const piezasExtra = createSafetyAndTools(scene, {
+    spacing: 2.2,
+    columns: 4,
+    scale: 0.85
+  });
+
+  const origenX = -8.5;
+  const origenZ = -13.5;
+  let contadorExtra = 0;
+  for (const [nombre, nodo] of piezasExtra) {
+    const col = contadorExtra % 4;
+    const fila = Math.floor(contadorExtra / 4);
+    nodo.position.set(origenX + col * 2.2, 0.02, origenZ + fila * 2.2);
+    contadorExtra++;
+
+    nodo.getChildMeshes().forEach((m) => {
+      m.isPickable = true;
+      m.metadata = {
+        esHerramienta: true,
+        id: nombre,
+        ...(nodo.metadata || {})
+      };
+    });
+  }
+
   const registrarPieza = (config) => {
     const nodo = config.mesh;
     nodo.position = config.posAlmacen.clone();
@@ -348,7 +383,7 @@ const createScene = () => {
     const hijos = nodo.getChildMeshes ? nodo.getChildMeshes() : [nodo];
     hijos.forEach((m) => {
       m.isPickable = true;
-      m.metadata = { idPieza: config.id };
+      m.metadata = { idPieza: config.id, ...(m.metadata || {}) };
     });
 
     componentesVehiculo.push({
@@ -360,344 +395,231 @@ const createScene = () => {
     });
   };
 
-  // 1. Chasis Tubular y Celda de Seguridad
-  const mallaChasis = MeshBuilder.CreateBox("chasis_tubos_base", { width: 0.85, height: 0.12, depth: 3.2 }, scene);
-  mallaChasis.material = matChasisTubular;
-
-  const tuboLatIzq = MeshBuilder.CreateCylinder("tuboLatIzq", { diameter: 0.06, height: 3.2 }, scene);
-  tuboLatIzq.rotation.x = Math.PI / 2;
-  tuboLatIzq.position.x = -0.42;
-  tuboLatIzq.parent = mallaChasis;
-  tuboLatIzq.material = matChasisTubular;
-
-  const tuboLatDer = MeshBuilder.CreateCylinder("tuboLatDer", { diameter: 0.06, height: 3.2 }, scene);
-  tuboLatDer.rotation.x = Math.PI / 2;
-  tuboLatDer.position.x = 0.42;
-  tuboLatDer.parent = mallaChasis;
-  tuboLatDer.material = matChasisTubular;
-
-  const arcoSeguridad = MeshBuilder.CreateTorus("arcoSeguridad", { diameter: 0.7, thickness: 0.06, tessellation: 24 }, scene);
-  arcoSeguridad.position = new Vector3(0, 0.45, 0.1);
-  arcoSeguridad.rotation.x = Math.PI / 2;
-  arcoSeguridad.parent = mallaChasis;
-  arcoSeguridad.material = matChasisTubular;
-
+  // ========================================================
+  // COMPONENTES IMPORTADOS DE /piezas/solar-piezas.js
+  // ========================================================
+  // 1. Chasis tubular
   registrarPieza({
-    id: "chasis",
-    nombre: "Chasis Tubular y Celda de Seguridad",
+    id: "c1-01",
+    nombre: "1.1 · Chasis / Estructura Portante",
     fase: "Fase 1: Estructura Principal",
-    descripcion: "Estructura espacial ultraligera en fibra de carbono y aleación aeronáutica con arco antivuelco.",
+    descripcion: "Bastidor spaceframe con arco de seguridad y bandeja portante.",
     masa: 35.0,
     deltaCdA: 0.04,
     potenciaSolar: 0,
     capacidadBat: 0,
-    mesh: mallaChasis,
-    posAlmacen: new Vector3(xTarima, 0.7, zCarro - 2.5),
+    mesh: createSolarPart(scene, "c1-01", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima, 0.45, zCarro - 2.8),
     posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.1, posCarroBase.z),
     vectorExplosion: new Vector3(0, 0, 0)
   });
 
-  // 2. Cockpit y Asiento de Competición
-  const mallaCockpit = MeshBuilder.CreateBox("cockpit_asiento", { width: 0.48, height: 0.65, depth: 0.5 }, scene);
-  mallaCockpit.material = matFibraCarbono;
-
-  const respaldo = MeshBuilder.CreateBox("respaldo", { width: 0.46, height: 0.65, depth: 0.1 }, scene);
-  respaldo.position = new Vector3(0, 0.35, -0.22);
-  respaldo.rotation.x = -0.2;
-  respaldo.parent = mallaCockpit;
-  respaldo.material = matFibraCarbono;
-
-  const volanteColumna = MeshBuilder.CreateCylinder("volanteCol", { diameter: 0.04, height: 0.5 }, scene);
-  volanteColumna.position = new Vector3(0, 0.25, 0.35);
-  volanteColumna.rotation.x = 0.6;
-  volanteColumna.parent = mallaCockpit;
-  volanteColumna.material = matMetalCromado;
-
-  const volanteAro = MeshBuilder.CreateTorus("volanteAro", { diameter: 0.28, thickness: 0.035, tessellation: 16 }, scene);
-  volanteAro.position = new Vector3(0, 0.45, 0.5);
-  volanteAro.rotation.x = 0.6;
-  volanteAro.parent = mallaCockpit;
-  volanteAro.material = matChasisTubular;
-
+  // 2. Asiento y arnés de 5 puntos
   registrarPieza({
-    id: "cockpit",
-    nombre: "Cockpit, Asiento de Carrera y Dirección",
+    id: "c1-06",
+    nombre: "1.6 · Asiento y Arnés de Sujeción",
     fase: "Fase 1: Estructura Principal",
-    descripcion: "Cabina del piloto ergonómica con volante tipo F1 y display de telemetría.",
+    descripcion: "Asiento bucket con rieles de ajuste y arnés de 5 puntos de seguridad.",
     masa: 12.0,
     deltaCdA: 0.02,
     potenciaSolar: 0,
     capacidadBat: 0,
-    mesh: mallaCockpit,
-    posAlmacen: new Vector3(xTarima + 0.8, 0.7, zCarro - 1.0),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.2, posCarroBase.z + 0.1),
-    vectorExplosion: new Vector3(0, 0.4, 0)
+    mesh: createSolarPart(scene, "c1-06", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima + 0.8, 0.45, zCarro - 1.4),
+    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.2, posCarroBase.z - 0.2),
+    vectorExplosion: new Vector3(0, 0.35, 0)
   });
 
-  // 3. Suspensión Delantera Pushrod
-  const mallaSuspDel = MeshBuilder.CreateBox("susp_del_base", { width: 1.4, height: 0.08, depth: 0.2 }, scene);
-  mallaSuspDel.material = matSuspensionAluminio;
-
-  const brazoIzqSup = MeshBuilder.CreateCylinder("brazoIzqSup", { diameter: 0.03, height: 0.5 }, scene);
-  brazoIzqSup.rotation.z = Math.PI / 3;
-  brazoIzqSup.position = new Vector3(-0.55, 0.1, 0);
-  brazoIzqSup.parent = mallaSuspDel;
-  brazoIzqSup.material = matSuspensionAluminio;
-
-  const brazoDerSup = MeshBuilder.CreateCylinder("brazoDerSup", { diameter: 0.03, height: 0.5 }, scene);
-  brazoDerSup.rotation.z = -Math.PI / 3;
-  brazoDerSup.position = new Vector3(0.55, 0.1, 0);
-  brazoDerSup.parent = mallaSuspDel;
-  brazoDerSup.material = matSuspensionAluminio;
-
-  const coiloverIzq = MeshBuilder.CreateCylinder("coiloverIzq", { diameter: 0.06, height: 0.3 }, scene);
-  coiloverIzq.position = new Vector3(-0.35, 0.15, 0);
-  coiloverIzq.rotation.z = -0.4;
-  coiloverIzq.parent = mallaSuspDel;
-  coiloverIzq.material = matResorteAmortiguador;
-
-  const coiloverDer = MeshBuilder.CreateCylinder("coiloverDer", { diameter: 0.06, height: 0.3 }, scene);
-  coiloverDer.position = new Vector3(0.35, 0.15, 0);
-  coiloverDer.rotation.z = 0.4;
-  coiloverDer.parent = mallaSuspDel;
-  coiloverDer.material = matResorteAmortiguador;
-
+  // 3. Volante de competición
   registrarPieza({
-    id: "suspension_delantera",
-    nombre: "Suspensión Delantera Pushrod (Doble Horquilla)",
+    id: "c5-01",
+    nombre: "5.1 · Volante de Competición",
+    fase: "Fase 1: Estructura Principal",
+    descripcion: "Volante de 3 radios con quick-release y aro antideslizante.",
+    masa: 2.5,
+    deltaCdA: 0.01,
+    potenciaSolar: 0,
+    capacidadBat: 0,
+    mesh: createSolarPart(scene, "c5-01", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima - 0.8, 0.45, zCarro - 1.4),
+    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.42, posCarroBase.z + 0.35),
+    vectorExplosion: new Vector3(0, 0.45, 0.2)
+  });
+
+  // 4. Suspensión de doble horquilla
+  registrarPieza({
+    id: "c5-04",
+    nombre: "5.4 · Sistema de Suspensión Pushrod",
     fase: "Fase 2: Suspensión y Dirección",
-    descripcion: "Geometría de alta rigidez torsional (3°/g) con amortiguadores ajustables para optimizar el vuelco.",
+    descripcion: "Esquina con doble horquilla, mangueta, buje y pushrod hacia torreta.",
     masa: 16.0,
     deltaCdA: 0.02,
     potenciaSolar: 0,
     capacidadBat: 0,
-    mesh: mallaSuspDel,
-    posAlmacen: new Vector3(xTarima - 0.7, 0.6, zCarro - 1.0),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.1, posCarroBase.z + 1.1),
-    vectorExplosion: new Vector3(0, 0, 0.6)
+    mesh: createSolarPart(scene, "c5-04", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima - 0.8, 0.45, zCarro),
+    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.15, posCarroBase.z + 0.95),
+    vectorExplosion: new Vector3(0, 0, 0.5)
   });
 
-  // 4. Ruedas Delanteras Aerodinámicas
-  const mallaRuedasDel = MeshBuilder.CreateBox("conjunto_ruedas_del", { width: 0.1, height: 0.1, depth: 0.1 }, scene);
-  mallaRuedasDel.isVisible = false;
-
-  const ruedaIzqMesh = MeshBuilder.CreateCylinder("ruedaIzqMesh", { diameter: 0.56, height: 0.12, tessellation: 24 }, scene);
-  ruedaIzqMesh.rotation.z = Math.PI / 2;
-  ruedaIzqMesh.position = new Vector3(-0.72, 0, 0);
-  ruedaIzqMesh.parent = mallaRuedasDel;
-  ruedaIzqMesh.material = matNeumatico;
-
-  const rinIzqMesh = MeshBuilder.CreateCylinder("rinIzqMesh", { diameter: 0.42, height: 0.125, tessellation: 20 }, scene);
-  rinIzqMesh.rotation.z = Math.PI / 2;
-  rinIzqMesh.position = new Vector3(-0.72, 0, 0);
-  rinIzqMesh.parent = mallaRuedasDel;
-  rinIzqMesh.material = matRinAero;
-
-  const ruedaDerMesh = MeshBuilder.CreateCylinder("ruedaDerMesh", { diameter: 0.56, height: 0.12, tessellation: 24 }, scene);
-  ruedaDerMesh.rotation.z = Math.PI / 2;
-  ruedaDerMesh.position = new Vector3(0.72, 0, 0);
-  ruedaDerMesh.parent = mallaRuedasDel;
-  ruedaDerMesh.material = matNeumatico;
-
-  const rinDerMesh = MeshBuilder.CreateCylinder("rinDerMesh", { diameter: 0.42, height: 0.125, tessellation: 20 }, scene);
-  rinDerMesh.rotation.z = Math.PI / 2;
-  rinDerMesh.position = new Vector3(0.72, 0, 0);
-  rinDerMesh.parent = mallaRuedasDel;
-  rinDerMesh.material = matRinAero;
-
+  // 5. Amortiguadores coilover
   registrarPieza({
-    id: "ruedas_delanteras",
-    nombre: "Ruedas Delanteras de Baja Fricción (Crr = 0.003)",
+    id: "c5-05",
+    nombre: "5.5 · Amortiguadores y Resortes",
+    fase: "Fase 2: Suspensión y Dirección",
+    descripcion: "Monoamortiguador coilover con vástago cromado y copelas.",
+    masa: 7.0,
+    deltaCdA: 0.01,
+    potenciaSolar: 0,
+    capacidadBat: 0,
+    mesh: createSolarPart(scene, "c5-05", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima + 0.8, 0.45, zCarro),
+    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.25, posCarroBase.z + 0.8),
+    vectorExplosion: new Vector3(0, 0.3, 0.4)
+  });
+
+  // 6. Frenos de disco ventilados
+  registrarPieza({
+    id: "c5-06",
+    nombre: "5.6 · Sistema de Frenos",
+    fase: "Fase 2: Suspensión y Dirección",
+    descripcion: "Disco ventilado perforado con cáliper deportivo y latiguillo hidráulico.",
+    masa: 6.5,
+    deltaCdA: 0.005,
+    potenciaSolar: 0,
+    capacidadBat: 0,
+    mesh: createSolarPart(scene, "c5-06", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima, 0.45, zCarro),
+    posCarro: new Vector3(posCarroBase.x + 0.45, posCarroBase.y + 0.12, posCarroBase.z + 0.95),
+    vectorExplosion: new Vector3(0.5, 0, 0.2)
+  });
+
+  // 7. Ruedas solares
+  registrarPieza({
+    id: "c4-06",
+    nombre: "4.6 · Ruedas Solares de Alta Presión",
     fase: "Fase 3: Tren Motriz y Ruedas",
-    descripcion: "Neumáticos solares de competición con rines aerodinámicos lenticulares.",
+    descripcion: "Rin monocasco de baja inercia y neumático de bajísima rodadura (Crr = 0.003).",
     masa: 14.0,
     deltaCdA: 0.015,
     potenciaSolar: 0,
     capacidadBat: 0,
-    mesh: mallaRuedasDel,
-    posAlmacen: new Vector3(xTarima + 0.8, 0.6, zCarro + 0.5),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.1, posCarroBase.z + 1.1),
-    vectorExplosion: new Vector3(0.6, 0, 0)
+    mesh: createSolarPart(scene, "c4-06", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima + 0.8, 0.45, zCarro + 1.3),
+    posCarro: new Vector3(posCarroBase.x + 0.52, posCarroBase.y + 0.15, posCarroBase.z + 0.95),
+    vectorExplosion: new Vector3(0.7, 0, 0)
   });
 
-  // 5. Rueda Trasera Motriz con Motor In-Wheel BLDC
-  const mallaRuedaTrasBLDC = MeshBuilder.CreateBox("conjunto_rueda_tras", { width: 0.1, height: 0.1, depth: 0.1 }, scene);
-  mallaRuedaTrasBLDC.isVisible = false;
-
-  const ruedaTrasMesh = MeshBuilder.CreateCylinder("ruedaTrasMesh", { diameter: 0.56, height: 0.14, tessellation: 24 }, scene);
-  ruedaTrasMesh.rotation.z = Math.PI / 2;
-  ruedaTrasMesh.position = new Vector3(0, 0, 0);
-  ruedaTrasMesh.parent = mallaRuedaTrasBLDC;
-  ruedaTrasMesh.material = matNeumatico;
-
-  const motorHub = MeshBuilder.CreateCylinder("motorHub", { diameter: 0.40, height: 0.15, tessellation: 24 }, scene);
-  motorHub.rotation.z = Math.PI / 2;
-  motorHub.position = new Vector3(0, 0, 0);
-  motorHub.parent = mallaRuedaTrasBLDC;
-  motorHub.material = matMotorBLDC;
-
+  // 8. Motor de tracción BLDC
   registrarPieza({
-    id: "motor_bldc_trasero",
-    nombre: "Motor Eléctrico de Cubo de Rueda (BLDC Hub Motor)",
+    id: "c4-01",
+    nombre: "4.1 · Motor Eléctrico de Tracción",
     fase: "Fase 3: Tren Motriz y Ruedas",
-    descripcion: "Motor trifásico síncrono de imanes permanentes integrado al eje con 96% de eficiencia de crucero.",
+    descripcion: "Motor síncrono BLDC con aletas de refrigeración y sensor Hall integrado.",
     masa: 18.0,
     deltaCdA: 0.01,
     potenciaSolar: 0,
     capacidadBat: 0,
-    mesh: mallaRuedaTrasBLDC,
-    posAlmacen: new Vector3(xTarima - 0.7, 0.6, zCarro + 0.5),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.1, posCarroBase.z - 1.2),
-    vectorExplosion: new Vector3(0, 0, -0.7)
+    mesh: createSolarPart(scene, "c4-01", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima - 0.8, 0.45, zCarro + 1.3),
+    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.18, posCarroBase.z - 1.1),
+    vectorExplosion: new Vector3(0, 0, -0.6)
   });
 
-  // 6. Banco de Baterías LiFePO4 (5.0 kWh)
-  const mallaBateria = MeshBuilder.CreateBox("pack_baterias", { width: 0.72, height: 0.18, depth: 0.85 }, scene);
-  mallaBateria.material = matBateriaLiFePO4;
-
-  const bmsCaja = MeshBuilder.CreateBox("bmsCaja", { width: 0.25, height: 0.08, depth: 0.25 }, scene);
-  bmsCaja.position = new Vector3(0, 0.12, 0.2);
-  bmsCaja.parent = mallaBateria;
-  bmsCaja.material = matElectronica;
-
+  // 9. Controlador / Inversor de motor
   registrarPieza({
-    id: "bateria_pack",
-    nombre: "Banco de Baterías LiFePO4 de Alta Densidad",
-    fase: "Fase 4: Sistema Energético y Electrónica",
-    descripcion: "Pack modular de 5.0 kWh ubicado en la base para descender el Centro de Gravedad (h = 0.42 m).",
+    id: "c4-02",
+    nombre: "4.2 · Controlador del Motor",
+    fase: "Fase 3: Tren Motriz y Ruedas",
+    descripcion: "Inversor de potencia trifásico con >98% de rendimiento.",
+    masa: 8.5,
+    deltaCdA: 0.0,
+    potenciaSolar: 0,
+    capacidadBat: 0,
+    mesh: createSolarPart(scene, "c4-02", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima, 0.45, zCarro + 1.3),
+    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.32, posCarroBase.z - 0.9),
+    vectorExplosion: new Vector3(0, 0.3, -0.3)
+  });
+
+  // 10. Batería de tracción Li-ion
+  registrarPieza({
+    id: "c3-01",
+    nombre: "3.1 · Batería de Tracción Li-Ion",
+    fase: "Fase 4: Almacenamiento y Gestión",
+    descripcion: "Pack modular 5.0 kWh con celdas 18650 y busbars de cobre.",
     masa: 28.0,
     deltaCdA: 0.0,
     potenciaSolar: 0,
     capacidadBat: 5.0,
-    mesh: mallaBateria,
-    posAlmacen: new Vector3(xTarima + 0.8, 0.6, zCarro + 2.0),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.1, posCarroBase.z - 0.45),
-    vectorExplosion: new Vector3(0, -0.3, 0)
+    mesh: createSolarPart(scene, "c3-01", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima + 0.8, 0.45, zCarro + 2.5),
+    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.12, posCarroBase.z - 0.5),
+    vectorExplosion: new Vector3(0, -0.25, 0)
   });
 
-  // 7. Electrónica de Potencia, Inversor y MPPT
-  const mallaElectronica = MeshBuilder.CreateBox("modulo_potencia", { width: 0.6, height: 0.15, depth: 0.4 }, scene);
-  mallaElectronica.material = matElectronica;
-
-  for (let i = -2; i <= 2; i++) {
-    const aleta = MeshBuilder.CreateBox(`aleta_${i}`, { width: 0.55, height: 0.04, depth: 0.02 }, scene);
-    aleta.position = new Vector3(0, 0.09, i * 0.06);
-    aleta.parent = mallaElectronica;
-    aleta.material = matSuspensionAluminio;
-  }
-
+  // 11. BMS y MPPT
   registrarPieza({
-    id: "inversor_mppt",
-    nombre: "Inversor y Controladores MPPT (Perturb & Observe)",
-    fase: "Fase 4: Sistema Energético y Electrónica",
-    descripcion: "Electrónica de potencia con seguimiento del Punto de Máxima Potencia y >98% de eficiencia.",
-    masa: 9.0,
+    id: "c3-03",
+    nombre: "3.3 · Controlador MPPT Solar",
+    fase: "Fase 4: Almacenamiento y Gestión",
+    descripcion: "Controlador MPPT con aletas disipadoras y algoritmo P&O.",
+    masa: 6.0,
     deltaCdA: 0.0,
     potenciaSolar: 0,
     capacidadBat: 0,
-    mesh: mallaElectronica,
-    posAlmacen: new Vector3(xTarima - 0.7, 0.6, zCarro + 2.0),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.25, posCarroBase.z - 0.85),
-    vectorExplosion: new Vector3(0, 0.35, -0.3)
+    mesh: createSolarPart(scene, "c3-03", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima - 0.8, 0.45, zCarro + 2.5),
+    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.35, posCarroBase.z - 0.65),
+    vectorExplosion: new Vector3(0, 0.35, -0.2)
   });
 
-  // 8. Fondo Plano Aerodinámico y Difusor
-  const mallaFondoPlano = MeshBuilder.CreateBox("fondo_plano_chasis", { width: 1.5, height: 0.06, depth: 3.8 }, scene);
-  mallaFondoPlano.material = matFibraCarbono;
-
-  const difusorTrasero = MeshBuilder.CreateBox("difusorTrasero", { width: 1.3, height: 0.04, depth: 0.8 }, scene);
-  difusorTrasero.position = new Vector3(0, 0.06, -1.6);
-  difusorTrasero.rotation.x = -0.15;
-  difusorTrasero.parent = mallaFondoPlano;
-  difusorTrasero.material = matFibraCarbono;
-
+  // 12. Carrocería aerodinámica
   registrarPieza({
-    id: "fondo_plano",
-    nombre: "Belly Pan y Difusor Aerodinámico Inferior",
+    id: "c1-03",
+    nombre: "1.3 · Paneles de Carrocería Composite",
     fase: "Fase 5: Carrocería Aerodinámica",
-    descripcion: "Suelo liso sellado para suprimir vórtices de interferencia y efecto suelo laminar (y+ < 1).",
-    masa: 15.0,
-    deltaCdA: -0.05,
+    descripcion: "Carenado aerodinámico optimizado CFD con bajísimo arrastre.",
+    masa: 25.0,
+    deltaCdA: -0.12,
     potenciaSolar: 0,
     capacidadBat: 0,
-    mesh: mallaFondoPlano,
-    posAlmacen: new Vector3(xTarima, 0.6, zCarro + 3.2),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y - 0.02, posCarroBase.z),
-    vectorExplosion: new Vector3(0, -0.45, 0)
+    mesh: createSolarPart(scene, "c1-03", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima, 1.2, zCarro - 1.2),
+    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.05, posCarroBase.z),
+    vectorExplosion: new Vector3(0, 0.6, 0)
   });
 
-  // 9. Carrocería Superior Aerodinámica (Aeroshell)
-  const mallaAeroshell = MeshBuilder.CreateBox("aeroshell_superior", { width: 1.65, height: 0.35, depth: 4.2 }, scene);
-  mallaAeroshell.material = matCarroceriaAero;
-
-  const pontonIzq = MeshBuilder.CreateBox("pontonIzq", { width: 0.3, height: 0.35, depth: 4.0 }, scene);
-  pontonIzq.position = new Vector3(-0.85, -0.05, 0);
-  pontonIzq.parent = mallaAeroshell;
-  pontonIzq.material = matCarroceriaAero;
-
-  const pontonDer = MeshBuilder.CreateBox("pontonDer", { width: 0.3, height: 0.35, depth: 4.0 }, scene);
-  pontonDer.position = new Vector3(0.85, -0.05, 0);
-  pontonDer.parent = mallaAeroshell;
-  pontonDer.material = matCarroceriaAero;
-
+  // 13. Celdas solares
   registrarPieza({
-    id: "carroceria_superior",
-    nombre: "Carrocería Superior Monocasco (Cd = 0.11)",
-    fase: "Fase 5: Carrocería Aerodinámica",
-    descripcion: "Diseño optimizado en CFD con modelo SST k-omega para flujo laminar continuo.",
-    masa: 22.0,
-    deltaCdA: -0.08,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: mallaAeroshell,
-    posAlmacen: new Vector3(xTarima, 1.4, zCarro - 2.5),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.45, posCarroBase.z),
-    vectorExplosion: new Vector3(0, 0.75, 0)
-  });
-
-  // 10. Matriz Fotovoltaica SunPower (1200 W Pico)
-  const mallaMatrizSolar = MeshBuilder.CreateBox("matriz_solar_placa", { width: 1.55, height: 0.03, depth: 3.4 }, scene);
-  mallaMatrizSolar.material = matPanelSolar;
-
-  for (let z = -1.4; z <= 1.4; z += 0.45) {
-    const divisorFila = MeshBuilder.CreateBox(`divSolar_${z}`, { width: 1.54, height: 0.032, depth: 0.015 }, scene);
-    divisorFila.position = new Vector3(0, 0.005, z);
-    divisorFila.parent = mallaMatrizSolar;
-    divisorFila.material = matMetalCromado;
-  }
-
-  registrarPieza({
-    id: "matriz_solar",
-    nombre: "Arreglo Fotovoltaico SunPower (1200 W Pico)",
-    fase: "Fase 6: Generación Solar y Acabados",
-    descripcion: "Celdas de silicio monocristalino de alta eficiencia (24.2%) con recubrimiento térmico CHT.",
+    id: "c2-01",
+    nombre: "2.1 · Celdas Fotovoltaicas Monocristalinas",
+    fase: "Fase 6: Sistema Solar y Telemetría",
+    descripcion: "Arreglo de silicio monocristalino SunPower de alta eficiencia (1200 W pico).",
     masa: 11.0,
     deltaCdA: 0.002,
     potenciaSolar: 1200,
     capacidadBat: 0,
-    mesh: mallaMatrizSolar,
-    posAlmacen: new Vector3(xTarima, 1.6, zCarro),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.65, posCarroBase.z - 0.2),
-    vectorExplosion: new Vector3(0, 1.15, 0)
+    mesh: createSolarPart(scene, "c2-01", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima, 1.2, zCarro + 0.6),
+    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.58, posCarroBase.z),
+    vectorExplosion: new Vector3(0, 0.9, 0)
   });
 
-  // 11. Cúpula del Habitáculo (Canopy)
-  const mallaCanopy = MeshBuilder.CreateSphere("canopy_cupula", { diameterX: 0.65, diameterY: 0.45, diameterZ: 1.2, segments: 16 }, scene);
-  mallaCanopy.material = matCupulaCanopy;
-
+  // 14. Telemetría e instrumentación
   registrarPieza({
-    id: "canopy",
-    nombre: "Cúpula Aerodinámica de Policarbonato",
-    fase: "Fase 6: Generación Solar y Acabados",
-    descripcion: "Canopy óptico curvado para visibilidad del piloto con mínima resistencia de estela.",
-    masa: 6.0,
-    deltaCdA: 0.008,
+    id: "c6-04",
+    nombre: "6.4 · Instrumentación y Telemetría",
+    fase: "Fase 6: Sistema Solar y Telemetría",
+    descripcion: "Pantalla con velocidad, SOC, potencia solar y módulo telemétrico.",
+    masa: 4.5,
+    deltaCdA: 0.005,
     potenciaSolar: 0,
     capacidadBat: 0,
-    mesh: mallaCanopy,
-    posAlmacen: new Vector3(xTarima, 1.5, zCarro + 2.5),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.72, posCarroBase.z + 0.7),
-    vectorExplosion: new Vector3(0, 0.9, 0.3)
+    mesh: createSolarPart(scene, "c6-04", { scale: 1.0 }),
+    posAlmacen: new Vector3(xTarima, 1.2, zCarro + 2.2),
+    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.46, posCarroBase.z + 0.2),
+    vectorExplosion: new Vector3(0, 0.7, 0.2)
   });
 
   // ==========================================
@@ -832,6 +754,16 @@ const createScene = () => {
       }
 
       let meta = pickResult.pickedMesh.metadata;
+      if (meta && meta.esHerramienta) {
+        const cat = meta.category === "seguridad" ? "🦺 Seguridad" : "🔧 Herramienta";
+        const label = meta.label || meta.name || "Equipo";
+        const tooltip = document.getElementById("tooltip-guia");
+        if (tooltip) tooltip.innerText = `${cat}: ${label} (Disponible en taller)`;
+        highlightLayer.removeAllMeshes();
+        highlightLayer.addMesh(pickResult.pickedMesh, Color3.Yellow());
+        setTimeout(() => highlightLayer.removeAllMeshes(), 1000);
+        return;
+      }
       if (!meta && pickResult.pickedMesh.parent) {
         meta = pickResult.pickedMesh.parent.metadata;
       }
