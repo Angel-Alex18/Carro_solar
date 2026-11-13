@@ -1,0 +1,60 @@
+export const es = {
+  "app_title": "Simulador de Vehículo Solar 3D",
+  "subtitle": "Metodología STEAM & Simulación Física Real",
+  "loading": "Cargando motor 3D y componentes físicos...",
+  "progress": "Progreso",
+  "phases": {
+    "M": "Fase M: Matemáticas",
+    "S": "Fase S: Ciencia",
+    "E": "Fase E: Ingeniería",
+    "T": "Fase T: Tecnología",
+    "A": "Fase A: Arte"
+  },
+  "phases_desc": {
+    "M": "Cálculo de engranes, torque y balance resistivo",
+    "S": "Laboratorio fotovoltaico e irradiancia",
+    "E": "Taller de ensamblaje 3D de piezas",
+    "T": "Programación de BMS y freno regenerativo",
+    "A": "Aerodinámica y personalización de carrocería"
+  },
+  "buttons": {
+    "assemble": "Instalar Pieza",
+    "disassemble_all": "Desarmar Todo",
+    "confirm": "Confirmar",
+    "cancel": "Cancelar",
+    "test_track": "Probar en Pista",
+    "back_workshop": "Volver al Taller",
+    "save": "Guardar Avance",
+    "teacher_mode": "Modo Profesor (Lectura)",
+    "student_mode": "Modo Alumno",
+    "inspect": "Inspeccionar",
+    "calculate": "Calcular",
+    "next_phase": "Siguiente Fase",
+    "prev_phase": "Fase Anterior"
+  },
+  "telemetry": {
+    "speed": "Velocidad",
+    "power": "Potencia Motriz",
+    "solar": "Generación Solar",
+    "battery": "Batería (SoC)",
+    "regen": "Freno Regenerativo",
+    "cda": "Cd·A Aerodinámico",
+    "distance": "Distancia",
+    "active": "ACTIVO",
+    "idle": "EN REPOSO"
+  },
+  "modals": {
+    "confirm_reset_title": "¿Confirmar desarme completo?",
+    "confirm_reset_text": "Esta acción removerá todas las piezas ensambladas. El progreso de cálculo se mantendrá.",
+    "mission_success_title": "¡Misión Solar Cumplida!",
+    "mission_success_text": "El vehículo ha demostrado estabilidad aerodinámica, autonomía energética positiva y eficiencia motriz.",
+    "mission_fail_title": "Misión No Superada",
+    "mission_fail_text": "La energía de la batería se ha agotado o el vehículo presentó resistencia aerodinámica excesiva.",
+    "teacher_view_notice": "Estás en MODO PROFESOR (Sólo Lectura). Las modificaciones de ensamblaje están deshabilitadas."
+  },
+  "accessibility": {
+    "nav_hint": "Use Tab y flechas del teclado para navegar. Espacio o Enter para accionar.",
+    "assembled_status": "Estado de ensamblaje"
+  }
+};
+export default es;

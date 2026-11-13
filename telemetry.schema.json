@@ -1,0 +1,115 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SolarVehicleTelemetryRecord",
+  "type": "object",
+  "required": [
+    "timestamp",
+    "speed_kmh",
+    "motor_rpm",
+    "motor_torque_nm",
+    "battery_soc_pct",
+    "battery_voltage_v",
+    "battery_current_a",
+    "solar_power_w",
+    "aero_drag_n",
+    "rolling_resistance_n"
+  ],
+  "properties": {
+    "timestamp": {
+      "type": "number",
+      "description": "Tiempo transcurrido en simulación en segundos"
+    },
+    "speed_kmh": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Velocidad lineal en km/h"
+    },
+    "motor_rpm": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Revoluciones por minuto del rotor"
+    },
+    "motor_torque_nm": {
+      "type": "number",
+      "description": "Par entregado por el motor en N*m"
+    },
+    "motor_power_w": {
+      "type": "number",
+      "description": "Potencia mecánica o eléctrica de tracción en Watts"
+    },
+    "motor_efficiency": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Eficiencia instantánea del inversor y motor"
+    },
+    "battery_soc_pct": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Estado de carga de la batería en %"
+    },
+    "battery_voltage_v": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Tensión del pack de batería en Voltios"
+    },
+    "battery_current_a": {
+      "type": "number",
+      "description": "Corriente de batería: positiva descarga, negativa recarga solar/regen"
+    },
+    "battery_temp_c": {
+      "type": "number",
+      "description": "Temperatura del pack en °C"
+    },
+    "solar_irradiance_wm2": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Irradiancia incidente en W/m^2"
+    },
+    "solar_power_w": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Potencia generada por el panel solar en W"
+    },
+    "panel_temp_c": {
+      "type": "number",
+      "description": "Temperatura de las celdas solares en °C"
+    },
+    "aero_drag_n": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Fuerza de arrastre aerodinámico en Newtons"
+    },
+    "rolling_resistance_n": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Fuerza de resistencia a la rodadura en Newtons"
+    },
+    "net_force_n": {
+      "type": "number",
+      "description": "Fuerza neta propulsiva resultante en Newtons"
+    },
+    "distance_m": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Distancia acumulada recorrida en metros"
+    },
+    "throttle_pct": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Posición del acelerador en %"
+    },
+    "brake_pct": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Posición del pedal de freno en %"
+    },
+    "regen_active": {
+      "type": "boolean",
+      "description": "Estado del freno regenerativo"
+    }
+  }
+}

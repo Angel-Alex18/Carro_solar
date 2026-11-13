@@ -1,0 +1,139 @@
+[
+  {
+    "id": "MOD-01",
+    "titulo": "Dinámica Longitudinal del Vehículo",
+    "area_steam": "M",
+    "descripcion": "Estudio de las fuerzas opuestas al movimiento: resistencia a la rodadura, arrastre aerodinámico y pendiente.",
+    "formulas": [
+      "F_res = F_rr + F_aero + F_pendiente",
+      "F_rr = C_rr * m * g * cos(theta)",
+      "F_aero = 0.5 * rho * C_d * A * v^2"
+    ],
+    "preguntas": [
+      {
+        "pregunta": "¿Cuál fuerza resistiva domina a velocidades altas (>60 km/h) en un vehículo solar?",
+        "opciones": [
+          "Resistencia a la rodadura (Crr)",
+          "Arrastre aerodinámico (F_aero)",
+          "Pérdidas parásitas en rodamientos",
+          "Inercia rotacional pura"
+        ],
+        "respuesta_correcta": 1,
+        "explicacion": "El arrastre aerodinámico escala cuadráticamente con la velocidad (v^2), convirtiéndose en la fuerza disipativa preponderante a altas velocidades."
+      }
+    ]
+  },
+  {
+    "id": "MOD-02",
+    "titulo": "Energía Solar y Conversión Fotovoltaica",
+    "area_steam": "S",
+    "descripcion": "Principios de irradiación directa y difusa, ángulo de incidencia solar y rendimiento de celdas de silicio monocristalino.",
+    "formulas": [
+      "P_solar = G_inc * A_panel * eta_celda * cos(theta)",
+      "eta_T = eta_ref * [1 - gamma * (T_celda - 25)]"
+    ],
+    "preguntas": [
+      {
+        "pregunta": "¿Qué efecto tiene un aumento térmico excesivo sobre la celda solar?",
+        "opciones": [
+          "Aumenta la tensión de circuito abierto (Voc)",
+          "Disminuye la eficiencia por coeficiente de temperatura negativo",
+          "No tiene ningún efecto significativo",
+          "Duplica la corriente de cortocircuito"
+        ],
+        "respuesta_correcta": 1,
+        "explicacion": "El silicio pierde aproximadamente -0.4%/°C en su punto de máxima potencia debido a la degradación térmica de la unión p-n."
+      }
+    ]
+  },
+  {
+    "id": "MOD-03",
+    "titulo": "Arquitectura Mecánica y Ensamblaje",
+    "area_steam": "E",
+    "descripcion": "Integración estructural del chasis tubular, tren de rodaje, dirección y sujeción de componentes de tracción.",
+    "formulas": [
+      "Sigma_max = (M * c) / I_inercia <= S_y / FS"
+    ],
+    "preguntas": [
+      {
+        "pregunta": "¿Por qué se utiliza aleación de aluminio 6061-T6 o fibra de carbono en el chasis?",
+        "opciones": [
+          "Para maximizar la relación rigidez-peso y reducir masa acelerada",
+          "Para aumentar la fricción con el asfalto",
+          "Únicamente por costo económico",
+          "Para incrementar el arrastre parásito"
+        ],
+        "respuesta_correcta": 0,
+        "explicacion": "En vehículos solares de competición, cada kilogramo ahorrado reduce linealmente la potencia de tracción requerida a velocidad constante."
+      }
+    ]
+  },
+  {
+    "id": "MOD-04",
+    "titulo": "Batería, BMS y Electrónica de Potencia",
+    "area_steam": "T",
+    "descripcion": "Dimensionamiento del pack LiFePO4 / NMC, balanceo pasivo/activo y gestión segura del estado de carga (SoC).",
+    "formulas": [
+      "SoC(t) = SoC(0) - (1 / C_nom) * integral(I_bat * dt)",
+      "P_elec = V_pack * I_pack"
+    ],
+    "preguntas": [
+      {
+        "pregunta": "¿Cuál es la función crítica del Battery Management System (BMS)?",
+        "opciones": [
+          "Pintar el vehículo con acabados UV",
+          "Monitorear tensiones de celda, temperaturas y cortar ante sobrecarga/sobredescarga",
+          "Sustituir el pedal del freno hidráulico",
+          "Generar la señal de audio de los altavoces"
+        ],
+        "respuesta_correcta": 1,
+        "explicacion": "El BMS previene fuga térmica y degradación prematura controlando ventana segura de operación (SOA)."
+      }
+    ]
+  },
+  {
+    "id": "MOD-05",
+    "titulo": "Tren Motriz y Frenado Regenerativo",
+    "area_steam": "T",
+    "descripcion": "Motor BLDC/PMSM con inversor trifásico y recuperación cinética en fases de desaceleración.",
+    "formulas": [
+      "Tau_motor = k_t * I_q",
+      "P_regen = eta_regen * F_freno * v"
+    ],
+    "preguntas": [
+      {
+        "pregunta": "¿Cómo recupera energía el freno regenerativo durante una desaceleración?",
+        "opciones": [
+          "Disipando calor en los discos cerámicos",
+          "Operando el motor síncrono como generador inyectando corriente al pack",
+          "Comprimiendo aire en un calderín neumático",
+          "Desconectando la batería del bus DC"
+        ],
+        "respuesta_correcta": 1,
+        "explicacion": "El inversor conmuta los MOSFET/IGBT en puente elevador inverso, convirtiendo torque resistente en corriente de recarga."
+      }
+    ]
+  },
+  {
+    "id": "MOD-06",
+    "titulo": "Diseño Aerodinámico y Optimización Global",
+    "area_steam": "A",
+    "descripcion": "Modelado de carrocerías catamarán o gota de lágrima para minimizar el coeficiente de arrastre Cd*A.",
+    "formulas": [
+      "P_trac = (F_rr + 0.5 * rho * Cd * A * v^2) * v / eta_transmision"
+    ],
+    "preguntas": [
+      {
+        "pregunta": "¿Qué beneficio aporta el diseño aerodinámico de baja resistencia (Cd < 0.12)?",
+        "opciones": [
+          "Reduce drásticamente el consumo de vatios por kilómetro recorrido a velocidad crucero",
+          "Permite prescindir de celdas solares",
+          "Aumenta la fuerza de rozamiento estático",
+          "Elimina la necesidad de frenos de servicio"
+        ],
+        "respuesta_correcta": 0,
+        "explicacion": "Una reducción del 20% en Cd·A incrementa la velocidad de crucero en más de 8 km/h para la misma potencia solar incidente."
+      }
+    ]
+  }
+]

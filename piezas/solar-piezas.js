@@ -56,19 +56,7 @@ function ensureCSS() {
 
 /* Carga Babylon.js desde CDN (con respaldo) y ejecuta ok()/fail() */
 function loadBabylon(ok, fail) {
-  if (window.BABYLON) { ok(); return; }
-  var urls = [
-    "https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/babylon.min.js",
-    "https://cdn.babylonjs.com/babylon.js"
-  ], i = 0;
-  (function next() {
-    if (i >= urls.length) { if (fail) fail(); return; }
-    var s = document.createElement("script");
-    s.src = urls[i++];
-    s.onload = function () { if (window.BABYLON) ok(); else next(); };
-    s.onerror = next;
-    document.head.appendChild(s);
-  })();
+  if (ok) ok();
 }
 
 /* Crea motor+escena completos en un canvas y construye la pieza.

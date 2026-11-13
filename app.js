@@ -1,18 +1,25 @@
-import {
+﻿import {
   Engine,
   Scene,
   UniversalCamera,
   ArcRotateCamera,
+  FollowCamera,
   Vector3,
   Color3,
+  Color4,
   HemisphericLight,
   PointLight,
+  DirectionalLight,
+  ShadowGenerator,
   StandardMaterial,
   MeshBuilder,
   Animation,
-  HighlightLayer
+  HighlightLayer,
+  TransformNode,
+  Mesh
 } from "@babylonjs/core";
 import "@babylonjs/loaders";
+
 import { createSafetyAndTools } from "./piezas/safety-tools.js";
 import {
   createSolarPart,
@@ -21,58 +28,209 @@ import {
   SOLAR_CATEGORIES
 } from "./piezas/solar-piezas.js";
 
+import { createPBRMaterialLibrary, createTireSmokeParticleSystem, createLocalSparkSystem } from "./pbr-materials.js";
+import { loadGltfOrFallback } from "./gltf-loader.js";
+import { SolarVehiclePhysics } from "./sim-physics.js";
+import { SteamManager } from "./steam-manager.js";
+import { vehicleAudio } from "./sim-audio.js";
+import { ProgressManager } from "./progress-manager.js";
+import { t, setLanguage, getLanguage } from "./i18n/index.js";
+
+// ==========================================
+// PANTALLA DE CARGA (LOADING SCREEN CON PROGRESO REAL)
+// ==========================================
+const loadingDiv = document.createElement("div");
+loadingDiv.id = "app-loading-screen";
+loadingDiv.innerHTML = `
+  <div class="loading-box">
+    <div class="loading-spinner"></div>
+    <h2 id="loading-title">Iniciando Simulador Solar Fotorrealista...</h2>
+    <div class="loading-bar-bg">
+      <div id="loading-bar-fill" class="loading-bar-fill"></div>
+    </div>
+    <p id="loading-subtitle" style="font-size: 13px; color: #88a0c0; margin-top: 10px;">Compilando shaders PBR, texturas procedurales y generador de sombras...</p>
+  </div>
+  <style>
+    #app-loading-screen {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at center, #141c2c 0%, #06090e 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #fff;
+      transition: opacity 0.5s ease;
+    }
+    .loading-box {
+      width: 380px;
+      text-align: center;
+      padding: 32px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(80, 150, 255, 0.3);
+      border-radius: 18px;
+      box-shadow: 0 15px 45px rgba(0,0,0,0.7);
+      backdrop-filter: blur(12px);
+    }
+    .loading-spinner {
+      width: 52px;
+      height: 52px;
+      margin: 0 auto 18px;
+      border: 4px solid rgba(80, 150, 255, 0.2);
+      border-top-color: #007aff;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-bar-bg {
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 15px;
+    }
+    .loading-bar-fill {
+      height: 100%;
+      width: 15%;
+      background: linear-gradient(90deg, #007aff, #30d158);
+      transition: width 0.3s ease;
+    }
+  </style>
+`;
+document.body.appendChild(loadingDiv);
+
+function updateLoadingProgress(pct, text) {
+  const bar = document.getElementById("loading-bar-fill");
+  const sub = document.getElementById("loading-subtitle");
+  if (bar) bar.style.width = `${pct}%`;
+  if (sub && text) sub.innerText = text;
+}
+
+function hideLoadingScreen() {
+  updateLoadingProgress(100, "¡Entorno Físico Listo!");
+  setTimeout(() => {
+    if (loadingDiv) {
+      loadingDiv.style.opacity = "0";
+      setTimeout(() => loadingDiv.remove(), 500);
+    }
+  }, 450);
+}
+
 const canvas = document.getElementById("renderCanvas");
-const engine = new Engine(canvas, true);
+const engine = new Engine(canvas, true, { antialias: true, adaptToDeviceRatio: true });
 
 const createScene = () => {
+  updateLoadingProgress(30, "Configurando iluminación PBR y sombras dinámicas...");
   const scene = new Scene(engine);
-  scene.clearColor = new Color3(0.55, 0.75, 0.95); // Cielo
+  scene.clearColor = new Color3(0.52, 0.72, 0.95);
 
-  // ==========================================
-  // 1. FÍSICAS BÁSICAS Y COLISIONES
-  // ==========================================
   scene.collisionsEnabled = true;
   scene.gravity = new Vector3(0, -9.81 / 60, 0);
 
   // ==========================================
-  // 2. SISTEMA DE CÁMARAS (PRIMERA PERSONA Y ORBITAL DE INSPECCIÓN)
+  // 1. ILUMINACIÓN PBR Y SOMBRAS DINÁMICAS (SHADOW GENERATOR)
   // ==========================================
+  const sunLight = new HemisphericLight("ambientLight", new Vector3(0, 1, 0), scene);
+  sunLight.intensity = 0.65;
+  sunLight.groundColor = new Color3(0.2, 0.22, 0.25);
+
+  const dirSun = new DirectionalLight("dirSun", new Vector3(-0.55, -1, 0.35), scene);
+  dirSun.intensity = 1.4;
+  dirSun.position = new Vector3(30, 50, -20);
+
+  // Generador de Sombras en Tiempo Real con Suavizado
+  const shadowGenerator = new ShadowGenerator(2048, dirSun);
+  shadowGenerator.usePercentageCloserFiltering = true;
+  shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
+  shadowGenerator.bias = 0.0015;
+
+  const garageLight = new PointLight("garageLight", new Vector3(0, 7, -3), scene);
+  garageLight.diffuse = new Color3(1, 0.96, 0.9);
+  garageLight.intensity = 0.85;
+  garageLight.range = 35;
+
+  const carSpotLight = new PointLight("carSpotLight", new Vector3(0, 4.5, -4), scene);
+  carSpotLight.diffuse = new Color3(0.92, 0.96, 1.0);
+  carSpotLight.intensity = 0.75;
+  carSpotLight.range = 12;
+
+  // Librería de Materiales PBR
+  updateLoadingProgress(45, "Generando texturas de fibra de carbono y celdas solares...");
+  const pbrLibrary = createPBRMaterialLibrary(scene);
+
+  // ==========================================
+  // 2. SISTEMA DE CÁMARAS CINEMÁTICAS
+  // ==========================================
+  // Cámara 1: FPS en Taller
   const cameraFPS = new UniversalCamera("playerCamera", new Vector3(0, 1.8, -10), scene);
-  cameraFPS.keysUp = [87, 38];       // W / Flecha Arriba
-  cameraFPS.keysDown = [83, 40];     // S / Flecha Abajo
-  cameraFPS.keysLeft = [65, 37];     // A / Flecha Izquierda
-  cameraFPS.keysRight = [68, 39];    // D / Flecha Derecha
+  cameraFPS.keysUp = [87, 38];
+  cameraFPS.keysDown = [83, 40];
+  cameraFPS.keysLeft = [65, 37];
+  cameraFPS.keysRight = [68, 39];
   cameraFPS.speed = 0.35;
   cameraFPS.angularSensibility = 2500;
   cameraFPS.checkCollisions = true;
   cameraFPS.applyGravity = true;
   cameraFPS.ellipsoid = new Vector3(0.6, 0.88, 0.6);
 
+  // Cámara 2: Orbital de Inspección 360°
   const cameraOrbit = new ArcRotateCamera("orbitCamera", -Math.PI / 2, Math.PI / 3, 5.5, new Vector3(0, 0.9, -4), scene);
-  cameraOrbit.lowerRadiusLimit = 2.0;
-  cameraOrbit.upperRadiusLimit = 12.0;
+  cameraOrbit.lowerRadiusLimit = 1.8;
+  cameraOrbit.upperRadiusLimit = 14.0;
   cameraOrbit.wheelPrecision = 40;
   cameraOrbit.checkCollisions = true;
 
-  let modoOrbital = false;
+  // Cámara 3: Follow Camera Exterior (Chase Cam)
+  const cameraTrack = new FollowCamera("trackCamera", new Vector3(0, 3, -10), scene);
+  cameraTrack.radius = 6.8;
+  cameraTrack.heightOffset = 2.2;
+  cameraTrack.rotationOffset = 180;
+  cameraTrack.cameraAcceleration = 0.12;
+  cameraTrack.maxCameraSpeed = 35;
+
+  // Cámara 4: Cockpit (Primera persona dentro del monoplaza)
+  const cameraCockpit = new UniversalCamera("cockpitCamera", new Vector3(0, 0.65, 0.1), scene);
+  cameraCockpit.fov = 1.25;
+
+  let modoCamara = "fps"; // 'fps', 'orbit', 'track', 'cockpit'
   scene.activeCamera = cameraFPS;
   cameraFPS.attachControl(canvas, true);
 
-  const toggleCamara = () => {
-    modoOrbital = !modoOrbital;
-    if (modoOrbital) {
-      cameraFPS.detachControl();
+  const setCamaraMode = (mode) => {
+    cameraFPS.detachControl();
+    cameraOrbit.detachControl();
+    cameraTrack.detachControl();
+    cameraCockpit.detachControl();
+
+    modoCamara = mode;
+    if (mode === "orbit") {
       scene.activeCamera = cameraOrbit;
       cameraOrbit.attachControl(canvas, true);
+    } else if (mode === "track") {
+      scene.activeCamera = cameraTrack;
+      cameraTrack.attachControl(canvas, true);
+    } else if (mode === "cockpit") {
+      scene.activeCamera = cameraCockpit;
     } else {
-      cameraOrbit.detachControl();
       scene.activeCamera = cameraFPS;
       cameraFPS.attachControl(canvas, true);
     }
     actualizarUI();
   };
 
-  // Correr con SHIFT y cambiar cámara con C
+  const toggleCamara = () => {
+    if (enModoPista) {
+      if (modoCamara === "track") setCamaraMode("cockpit");
+      else if (modoCamara === "cockpit") setCamaraMode("orbit");
+      else setCamaraMode("track");
+    } else {
+      if (modoCamara === "fps") setCamaraMode("orbit");
+      else setCamaraMode("fps");
+    }
+  };
+
   window.addEventListener("keydown", (e) => {
     if (e.key === "Shift") cameraFPS.speed = 0.7;
     if (e.key === "c" || e.key === "C") toggleCamara();
@@ -86,697 +244,440 @@ const createScene = () => {
   highlightLayer.outerGlow = true;
 
   // ==========================================
-  // 3. ILUMINACIÓN AVANZADA DE TALLER
+  // 3. ESTRUCTURA DEL TALLER Y CIRCUITO PROFESIONAL
   // ==========================================
-  const sunLight = new HemisphericLight("sunLight", new Vector3(0, 1, 0), scene);
-  sunLight.intensity = 0.65;
+  updateLoadingProgress(60, "Construyendo circuito con pianos, asfalto y vallas de seguridad...");
 
-  const garageLight = new PointLight("garageLight", new Vector3(0, 7, -3), scene);
-  garageLight.diffuse = new Color3(1, 0.96, 0.9);
-  garageLight.intensity = 0.9;
-  garageLight.range = 35;
+  // Piso Taller Pulido con reflejos
+  const pisoTaller = MeshBuilder.CreateBox("pisoTaller", { width: 22, height: 0.2, depth: 22 }, scene);
+  pisoTaller.position = new Vector3(0, -0.1, 0);
+  pisoTaller.material = pbrLibrary.carbon;
+  pisoTaller.receiveShadows = true;
+  pisoTaller.checkCollisions = true;
 
-  // Foco cenital sobre el carro solar
-  const carSpotLight = new PointLight("carSpotLight", new Vector3(0, 4.5, -4), scene);
-  carSpotLight.diffuse = new Color3(0.85, 0.95, 1.0);
-  carSpotLight.intensity = 1.2;
-  carSpotLight.range = 15;
-
-  // Luz para la tarima de repuestos
-  const benchSpot = new PointLight("benchSpot", new Vector3(5.5, 3.5, -4), scene);
-  benchSpot.diffuse = new Color3(1.0, 0.85, 0.65);
-  benchSpot.intensity = 0.8;
-  benchSpot.range = 10;
-
-  // ==========================================
-  // 4. MATERIALES
-  // ==========================================
   const matPared = new StandardMaterial("matPared", scene);
-  matPared.diffuseColor = new Color3(0.72, 0.73, 0.76);
+  matPared.diffuseColor = new Color3(0.85, 0.88, 0.92);
 
-  const matPisoGarage = new StandardMaterial("matPisoGarage", scene);
-  matPisoGarage.diffuseColor = new Color3(0.24, 0.25, 0.28);
-  matPisoGarage.specularColor = new Color3(0.15, 0.15, 0.15);
+  const matParedAcento = new StandardMaterial("matParedAcento", scene);
+  matParedAcento.diffuseColor = new Color3(0.08, 0.25, 0.55);
 
-  const matPisoExterior = new StandardMaterial("matPisoExterior", scene);
-  matPisoExterior.diffuseColor = new Color3(0.14, 0.14, 0.14);
-
-  const matPorton = new StandardMaterial("matPorton", scene);
-  matPorton.diffuseColor = new Color3(0.85, 0.35, 0.12);
-
-  const matMarco = new StandardMaterial("matMarco", scene);
-  matMarco.diffuseColor = new Color3(0.1, 0.1, 0.1);
-
-  const matPista = new StandardMaterial("matPista", scene);
-  matPista.diffuseColor = new Color3(0.12, 0.12, 0.12);
-
-  const matLineaCentral = new StandardMaterial("matLineaCentral", scene);
-  matLineaCentral.diffuseColor = new Color3(0.9, 0.9, 0.1);
-
-  const matBanco = new StandardMaterial("matBanco", scene);
-  matBanco.diffuseColor = new Color3(0.2, 0.2, 0.22);
-
-  const matCajaHerramientas = new StandardMaterial("matCajaHerramientas", scene);
-  matCajaHerramientas.diffuseColor = new Color3(0.75, 0.1, 0.1);
-
-  const matMetalCromado = new StandardMaterial("matMetalCromado", scene);
-  matMetalCromado.diffuseColor = new Color3(0.85, 0.85, 0.9);
-  matMetalCromado.specularColor = new Color3(1, 1, 1);
-
-  const matMangoDestornillador = new StandardMaterial("matMangoDestornillador", scene);
-  matMangoDestornillador.diffuseColor = new Color3(0.1, 0.7, 0.2);
-
-  const matMangoPinza = new StandardMaterial("matMangoPinza", scene);
-  matMangoPinza.diffuseColor = new Color3(0.15, 0.15, 0.15);
-
-  const matGato = new StandardMaterial("matGato", scene);
-  matGato.diffuseColor = new Color3(0.1, 0.5, 0.8);
-
-  const matCaballete = new StandardMaterial("matCaballete", scene);
-  matCaballete.diffuseColor = new Color3(0.9, 0.7, 0.05);
-
-  const matTarimaRepuestos = new StandardMaterial("matTarimaRepuestos", scene);
-  matTarimaRepuestos.diffuseColor = new Color3(0.18, 0.18, 0.2);
-
-  // Materiales de alta fidelidad para el Vehículo Solar
-  const matFibraCarbono = new StandardMaterial("matFibraCarbono", scene);
-  matFibraCarbono.diffuseColor = new Color3(0.12, 0.12, 0.13);
-  matFibraCarbono.specularColor = new Color3(0.3, 0.3, 0.35);
-
-  const matChasisTubular = new StandardMaterial("matChasisTubular", scene);
-  matChasisTubular.diffuseColor = new Color3(0.25, 0.45, 0.85);
-  matChasisTubular.specularColor = new Color3(0.6, 0.6, 0.7);
-
-  const matSuspensionAluminio = new StandardMaterial("matSuspensionAluminio", scene);
-  matSuspensionAluminio.diffuseColor = new Color3(0.85, 0.2, 0.2);
-  matSuspensionAluminio.specularColor = new Color3(0.9, 0.9, 0.9);
-
-  const matResorteAmortiguador = new StandardMaterial("matResorteAmortiguador", scene);
-  matResorteAmortiguador.diffuseColor = new Color3(1.0, 0.8, 0.0);
-  matResorteAmortiguador.specularColor = new Color3(0.8, 0.8, 0.8);
-
-  const matNeumatico = new StandardMaterial("matNeumatico", scene);
-  matNeumatico.diffuseColor = new Color3(0.08, 0.08, 0.08);
-
-  const matRinAero = new StandardMaterial("matRinAero", scene);
-  matRinAero.diffuseColor = new Color3(0.75, 0.75, 0.8);
-
-  const matMotorBLDC = new StandardMaterial("matMotorBLDC", scene);
-  matMotorBLDC.diffuseColor = new Color3(0.7, 0.4, 0.15);
-  matMotorBLDC.specularColor = new Color3(0.9, 0.7, 0.4);
-
-  const matBateriaLiFePO4 = new StandardMaterial("matBateriaLiFePO4", scene);
-  matBateriaLiFePO4.diffuseColor = new Color3(0.15, 0.75, 0.35);
-
-  const matElectronica = new StandardMaterial("matElectronica", scene);
-  matElectronica.diffuseColor = new Color3(0.15, 0.15, 0.18);
-
-  const matCableadoAltoVoltaje = new StandardMaterial("matCableadoAltoVoltaje", scene);
-  matCableadoAltoVoltaje.diffuseColor = new Color3(0.95, 0.45, 0.05);
-
-  const matCarroceriaAero = new StandardMaterial("matCarroceriaAero", scene);
-  matCarroceriaAero.diffuseColor = new Color3(0.92, 0.93, 0.95);
-  matCarroceriaAero.specularColor = new Color3(0.8, 0.85, 0.9);
-
-  const matPanelSolar = new StandardMaterial("matPanelSolar", scene);
-  matPanelSolar.diffuseColor = new Color3(0.04, 0.12, 0.28);
-  matPanelSolar.specularColor = new Color3(0.7, 0.85, 1.0);
-
-  const matCupulaCanopy = new StandardMaterial("matCupulaCanopy", scene);
-  matCupulaCanopy.diffuseColor = new Color3(0.1, 0.3, 0.5);
-  matCupulaCanopy.alpha = 0.45;
-
-  // ==========================================
-  // 5. ESTRUCTURA DEL TALLER Y PISTA EXTERIOR
-  // ==========================================
-  const ancho = 22;
-  const alto = 8;
-  const prof = 26;
-  const zGarage = -5;
-
-  const pisoGarage = MeshBuilder.CreateGround("pisoGarage", { width: ancho, height: prof }, scene);
-  pisoGarage.position = new Vector3(0, 0, zGarage);
-  pisoGarage.material = matPisoGarage;
-  pisoGarage.checkCollisions = true;
-
-  const pisoExterior = MeshBuilder.CreateGround("pisoExterior", { width: 300, height: 300 }, scene);
-  pisoExterior.position = new Vector3(0, -0.01, 100);
-  pisoExterior.material = matPisoExterior;
-  pisoExterior.checkCollisions = true;
-
-  const paredIzq = MeshBuilder.CreateBox("paredIzq", { width: 0.5, height: alto, depth: prof }, scene);
-  paredIzq.position = new Vector3(-ancho / 2, alto / 2, zGarage);
-  paredIzq.material = matPared;
-  paredIzq.checkCollisions = true;
-
-  const paredDer = MeshBuilder.CreateBox("paredDer", { width: 0.5, height: alto, depth: prof }, scene);
-  paredDer.position = new Vector3(ancho / 2, alto / 2, zGarage);
-  paredDer.material = matPared;
-  paredDer.checkCollisions = true;
-
-  const paredFondo = MeshBuilder.CreateBox("paredFondo", { width: ancho, height: alto, depth: 0.5 }, scene);
-  paredFondo.position = new Vector3(0, alto / 2, zGarage - prof / 2);
-  paredFondo.material = matPared;
+  const paredFondo = MeshBuilder.CreateBox("paredFondo", { width: 22, height: 6, depth: 0.3 }, scene);
+  paredFondo.position = new Vector3(0, 3, -11);
+  paredFondo.material = matParedAcento;
+  paredFondo.receiveShadows = true;
   paredFondo.checkCollisions = true;
 
-  const techo = MeshBuilder.CreateBox("techo", { width: ancho, height: 0.4, depth: prof }, scene);
-  techo.position = new Vector3(0, alto, zGarage);
-  techo.material = matPared;
-  techo.checkCollisions = true;
+  const paredIzq = MeshBuilder.CreateBox("paredIzq", { width: 0.3, height: 6, depth: 22 }, scene);
+  paredIzq.position = new Vector3(-11, 3, 0);
+  paredIzq.material = matPared;
+  paredIzq.receiveShadows = true;
+  paredIzq.checkCollisions = true;
 
-  const anchoPorton = 12;
-  const altoPorton = 6;
-  const zEntrada = zGarage + prof / 2;
+  const paredDer = MeshBuilder.CreateBox("paredDer", { width: 0.3, height: 6, depth: 22 }, scene);
+  paredDer.position = new Vector3(11, 3, 0);
+  paredDer.material = matPared;
+  paredDer.receiveShadows = true;
+  paredDer.checkCollisions = true;
 
-  const dintel = MeshBuilder.CreateBox("dintel", { width: ancho, height: alto - altoPorton, depth: 0.5 }, scene);
-  dintel.position = new Vector3(0, altoPorton + (alto - altoPorton) / 2, zEntrada);
-  dintel.material = matPared;
-  dintel.checkCollisions = true;
-
-  const colIzq = MeshBuilder.CreateBox("colIzq", { width: (ancho - anchoPorton) / 2, height: altoPorton, depth: 0.5 }, scene);
-  colIzq.position = new Vector3(-(anchoPorton / 2 + (ancho - anchoPorton) / 4), altoPorton / 2, zEntrada);
-  colIzq.material = matPared;
-  colIzq.checkCollisions = true;
-
-  const colDer = MeshBuilder.CreateBox("colDer", { width: (ancho - anchoPorton) / 2, height: altoPorton, depth: 0.5 }, scene);
-  colDer.position = new Vector3((anchoPorton / 2 + (ancho - anchoPorton) / 4), altoPorton / 2, zEntrada);
-  colDer.material = matPared;
-  colDer.checkCollisions = true;
-
-  const marcoIzq = MeshBuilder.CreateBox("marcoIzq", { width: 0.25, height: altoPorton, depth: 0.6 }, scene);
-  marcoIzq.position = new Vector3(-anchoPorton / 2, altoPorton / 2, zEntrada);
-  marcoIzq.material = matMarco;
-
-  const marcoDer = MeshBuilder.CreateBox("marcoDer", { width: 0.25, height: altoPorton, depth: 0.6 }, scene);
-  marcoDer.position = new Vector3(anchoPorton / 2, altoPorton / 2, zEntrada);
-  marcoDer.material = matMarco;
-
-  const porton = MeshBuilder.CreateBox("porton", { width: anchoPorton - 0.1, height: altoPorton, depth: 0.2 }, scene);
-  const posCerradoY = altoPorton / 2;
-  const posAbiertoY = altoPorton + (alto - altoPorton) / 2 + altoPorton / 2;
-  porton.position = new Vector3(0, posCerradoY, zEntrada);
-  porton.material = matPorton;
+  // Portón del taller animado
+  const porton = MeshBuilder.CreateBox("porton", { width: 8, height: 4.8, depth: 0.2 }, scene);
+  const posCerradoY = 2.4;
+  const posAbiertoY = 6.8;
+  porton.position = new Vector3(0, posCerradoY, 11);
+  porton.material = pbrLibrary.metal;
+  porton.receiveShadows = true;
   porton.checkCollisions = true;
+  shadowGenerator.addShadowCaster(porton);
 
-  const largoCalle = 200;
-  const anchoCalle = 14;
-  const callePrincipal = MeshBuilder.CreateGround("callePrincipal", { width: anchoCalle, height: largoCalle }, scene);
-  callePrincipal.position = new Vector3(0, 0.01, zEntrada + largoCalle / 2);
-  callePrincipal.material = matPista;
-  callePrincipal.checkCollisions = true;
+  // Tarima de ensamble
+  const tarima = MeshBuilder.CreateBox("tarimaPiezas", { width: 7, height: 0.15, depth: 7 }, scene);
+  tarima.position = new Vector3(6.5, 0.075, 4);
+  tarima.material = pbrLibrary.metal;
+  tarima.receiveShadows = true;
 
-  const lineaCalle = MeshBuilder.CreateBox("lineaCalle", { width: 0.35, height: 0.02, depth: largoCalle - 2 }, scene);
-  lineaCalle.position = new Vector3(0, 0.02, zEntrada + largoCalle / 2);
-  lineaCalle.material = matLineaCentral;
-
-  // ==========================================
-  // 6. BANCO DE TRABAJO Y ESTACIÓN CENTRAL
-  // ==========================================
-  const bancoTrabajo = MeshBuilder.CreateBox("bancoTrabajo", { width: 2, height: 1.0, depth: 8 }, scene);
-  bancoTrabajo.position = new Vector3(-ancho / 2 + 1.2, 0.5, -3);
-  bancoTrabajo.material = matBanco;
-  bancoTrabajo.checkCollisions = true;
-
-  const cajonera = MeshBuilder.CreateBox("cajoneraHerramientas", { width: 1.5, height: 1.2, depth: 2 }, scene);
-  cajonera.position = new Vector3(-ancho / 2 + 1.2, 0.6, -8);
-  cajonera.material = matCajaHerramientas;
-  cajonera.checkCollisions = true;
-
-  const llave = MeshBuilder.CreateBox("herramienta_llave", { width: 0.15, height: 0.05, depth: 1.0 }, scene);
-  llave.position = new Vector3(-ancho / 2 + 1.2, 1.05, -5);
-  llave.material = matMetalCromado;
-
-  const ratchetCuerpo = MeshBuilder.CreateBox("herramienta_ratchet", { width: 0.2, height: 0.06, depth: 1.1 }, scene);
-  ratchetCuerpo.position = new Vector3(-ancho / 2 + 1.2, 1.05, -3.5);
-  ratchetCuerpo.material = matMetalCromado;
-
-  const destornilladorMango = MeshBuilder.CreateCylinder("herramienta_destornillador", { diameter: 0.12, height: 0.6 }, scene);
-  destornilladorMango.rotation.x = Math.PI / 2;
-  destornilladorMango.position = new Vector3(-ancho / 2 + 1.2, 1.05, -2);
-  destornilladorMango.material = matMangoDestornillador;
-
-  const pinzas = MeshBuilder.CreateBox("herramienta_pinzas", { width: 0.3, height: 0.08, depth: 0.9 }, scene);
-  pinzas.position = new Vector3(-ancho / 2 + 1.2, 1.05, -0.5);
-  pinzas.material = matMangoPinza;
-
-  const gatoHidraulico = MeshBuilder.CreateBox("gatoHidraulico", { width: 0.8, height: 0.3, depth: 1.5 }, scene);
-  gatoHidraulico.position = new Vector3(3.2, 0.15, -1.5);
-  gatoHidraulico.material = matGato;
-  gatoHidraulico.checkCollisions = true;
-
-  // Caballetes del vehículo
-  const zCarro = -4.0;
-  const caballeteDel = MeshBuilder.CreateBox("caballeteDel", { width: 1.6, height: 0.25, depth: 0.3 }, scene);
-  caballeteDel.position = new Vector3(0, 0.125, zCarro + 1.1);
-  caballeteDel.material = matCaballete;
-
-  const caballeteTras = MeshBuilder.CreateBox("caballeteTras", { width: 1.6, height: 0.25, depth: 0.3 }, scene);
-  caballeteTras.position = new Vector3(0, 0.125, zCarro - 1.1);
-  caballeteTras.material = matCaballete;
-
-  // Tarima de Repuestos
-  const xTarima = 6.0;
-  const tarimaRepuestos = MeshBuilder.CreateBox("tarimaRepuestos", { width: 3.5, height: 0.4, depth: 8.0 }, scene);
-  tarimaRepuestos.position = new Vector3(xTarima, 0.2, zCarro);
-  tarimaRepuestos.material = matTarimaRepuestos;
-  tarimaRepuestos.checkCollisions = true;
+  // Banco de trabajo central donde reposa el chasis
+  const bancoCentral = MeshBuilder.CreateBox("bancoCentral", { width: 2.2, height: 0.2, depth: 4.2 }, scene);
+  bancoCentral.position = new Vector3(0, 0.1, -4);
+  bancoCentral.material = pbrLibrary.metal;
+  bancoCentral.receiveShadows = true;
 
   // ==========================================
-  // 7. SUBSISTEMAS PROCEDURALES DEL VEHÍCULO
+  // CIRCUITO COMPLETO DE PRUEBAS EXTERIOR
   // ==========================================
-  const posCarroBase = new Vector3(0, 0.35, zCarro);
-  const componentesVehiculo = [];
+  const matPasto = new StandardMaterial("matPasto", scene);
+  matPasto.diffuseColor = new Color3(0.22, 0.48, 0.24);
+
+  const pisoExterior = MeshBuilder.CreateGround("pisoExterior", { width: 450, height: 450 }, scene);
+  pisoExterior.position = new Vector3(0, -0.05, 140);
+  pisoExterior.material = matPasto;
+  pisoExterior.receiveShadows = true;
+  pisoExterior.checkCollisions = true;
+
+  // Pista de Asfalto con Textura PBR y Marcas
+  const pistaAsfalto = MeshBuilder.CreateGround("pistaAsfalto", { width: 14, height: 320 }, scene);
+  pistaAsfalto.position = new Vector3(0, 0.02, 160);
+  pistaAsfalto.material = pbrLibrary.asfalto;
+  pistaAsfalto.receiveShadows = true;
+  pistaAsfalto.checkCollisions = true;
+
+  // Pianos (Kerbs) rojo y blanco a los costados
+  const kerbIzq = MeshBuilder.CreateBox("kerbIzq", { width: 1.2, height: 0.08, depth: 320 }, scene);
+  kerbIzq.position = new Vector3(-7.6, 0.04, 160);
+  kerbIzq.material = pbrLibrary.kerb;
+  kerbIzq.receiveShadows = true;
+
+  const kerbDer = MeshBuilder.CreateBox("kerbDer", { width: 1.2, height: 0.08, depth: 320 }, scene);
+  kerbDer.position = new Vector3(7.6, 0.04, 160);
+  kerbDer.material = pbrLibrary.kerb;
+  kerbDer.receiveShadows = true;
+
+  // Arco de Meta / Salida de Competición
+  const arcoMeta = MeshBuilder.CreateBox("arcoMetaViga", { width: 18, height: 0.8, depth: 1.0 }, scene);
+  arcoMeta.position = new Vector3(0, 5.5, 30);
+  arcoMeta.material = pbrLibrary.metal;
+  shadowGenerator.addShadowCaster(arcoMeta);
+
+  const posteMetaIzq = MeshBuilder.CreateCylinder("posteMetaIzq", { diameter: 0.4, height: 5.5 }, scene);
+  posteMetaIzq.position = new Vector3(-8.5, 2.75, 30);
+  posteMetaIzq.material = pbrLibrary.metal;
+  shadowGenerator.addShadowCaster(posteMetaIzq);
+
+  const posteMetaDer = MeshBuilder.CreateCylinder("posteMetaDer", { diameter: 0.4, height: 5.5 }, scene);
+  posteMetaDer.position = new Vector3(8.5, 2.75, 30);
+  posteMetaDer.material = pbrLibrary.metal;
+  shadowGenerator.addShadowCaster(posteMetaDer);
 
   // ==========================================
-  // 7.5. PIEZAS DE SEGURIDAD Y HERRAMIENTAS (safety-tools.js)
+  // 4. MONOPLAZA SOLAR 3D REALISTA CON SUSPENSIÓN Y PILOTO
   // ==========================================
+  updateLoadingProgress(75, "Ensamblando modelo mecatrónico del monoplaza y cabina...");
+  const carRoot = new TransformNode("carRoot", scene);
+  carRoot.position = new Vector3(0, 0.35, -4);
+  cameraTrack.lockedTarget = carRoot;
+  cameraCockpit.parent = carRoot;
+
+  // Sub-nodo con cabeceo y balanceo de suspensión (Pitch & Roll reactivo)
+  const carChassisBody = new TransformNode("carChassisBody", scene);
+  carChassisBody.parent = carRoot;
+
+  // 1. Piloto de Competición con Casco Aerodinámico en Cabina
+  const pilotoGroup = new TransformNode("pilotoGroup", scene);
+  pilotoGroup.parent = carChassisBody;
+  pilotoGroup.position = new Vector3(0, 0.28, 0.1);
+
+  const casco = MeshBuilder.CreateSphere("cascoPiloto", { diameterX: 0.34, diameterY: 0.42, diameterZ: 0.38 }, scene);
+  casco.position = new Vector3(0, 0.35, 0);
+  casco.parent = pilotoGroup;
+  casco.material = pbrLibrary.carroceria;
+  shadowGenerator.addShadowCaster(casco);
+
+  // Visera de iridio dorado
+  const visera = MeshBuilder.CreateBox("viseraCasco", { width: 0.28, height: 0.12, depth: 0.1 }, scene);
+  visera.position = new Vector3(0, 0.35, 0.16);
+  visera.parent = pilotoGroup;
+  visera.material = pbrLibrary.copper;
+
+  // Cuerpo y mono de competición del piloto
+  const cuerpoPiloto = MeshBuilder.CreateBox("cuerpoPiloto", { width: 0.46, height: 0.55, depth: 0.35 }, scene);
+  cuerpoPiloto.position = new Vector3(0, 0.05, -0.05);
+  cuerpoPiloto.parent = pilotoGroup;
+  cuerpoPiloto.material = pbrLibrary.carbon;
+
+  // Volante monoplaza con pantalla telemétrica LED
+  const volanteMesh = MeshBuilder.CreateBox("volanteRacing", { width: 0.32, height: 0.18, depth: 0.04 }, scene);
+  volanteMesh.position = new Vector3(0, 0.32, 0.45);
+  volanteMesh.parent = carChassisBody;
+  volanteMesh.material = pbrLibrary.carbon;
+
+  // Faros LED Delanteros Funcionales
+  const faroIzq = MeshBuilder.CreateBox("faroIzq", { width: 0.18, height: 0.08, depth: 0.05 }, scene);
+  faroIzq.position = new Vector3(-0.55, 0.2, 1.85);
+  faroIzq.parent = carChassisBody;
+  faroIzq.material = pbrLibrary.ledFaro;
+
+  const faroDer = MeshBuilder.CreateBox("faroDer", { width: 0.18, height: 0.08, depth: 0.05 }, scene);
+  faroDer.position = new Vector3(0.55, 0.2, 1.85);
+  faroDer.parent = carChassisBody;
+  faroDer.material = pbrLibrary.ledFaro;
+
+  // Luces de Freno Traseras Funcionales
+  const luzFreno = MeshBuilder.CreateBox("luzFrenoTrasera", { width: 0.8, height: 0.06, depth: 0.05 }, scene);
+  luzFreno.position = new Vector3(0, 0.32, -1.85);
+  luzFreno.parent = carChassisBody;
+  luzFreno.material = pbrLibrary.ledFreno;
+
+  // Carrocería Aerodinámica Concept Car con PBR Clear Coat
+  const carroceriaConceptMesh = MeshBuilder.CreateBox("carroceriaConcept", { width: 1.48, height: 0.46, depth: 3.9 }, scene);
+  carroceriaConceptMesh.position = new Vector3(0, 0.45, 0);
+  carroceriaConceptMesh.parent = carChassisBody;
+  carroceriaConceptMesh.material = pbrLibrary.carroceria;
+  carroceriaConceptMesh.receiveShadows = true;
+  shadowGenerator.addShadowCaster(carroceriaConceptMesh);
+  carroceriaConceptMesh.setEnabled(false);
+
+  // Cúpula / Parabrisas Transparente (Canopy)
+  const canopyMesh = MeshBuilder.CreateSphere("canopyVidrio", { diameterX: 0.65, diameterY: 0.55, diameterZ: 1.4 }, scene);
+  canopyMesh.position = new Vector3(0, 0.55, 0.15);
+  canopyMesh.parent = carChassisBody;
+  canopyMesh.material = pbrLibrary.vidrio;
+
+  // Sistema de partículas para derrape de neumáticos
+  const tireSmokePS = createTireSmokeParticleSystem(scene, carRoot);
+
+  // Herramientas y piezas de seguridad en taller
   const piezasExtra = createSafetyAndTools(scene, {
-    spacing: 2.2,
+    spacing: 3.5,
     columns: 4,
     scale: 0.85
   });
-
-  const origenX = -8.5;
-  const origenZ = -13.5;
-  let contadorExtra = 0;
-  for (const [nombre, nodo] of piezasExtra) {
-    const col = contadorExtra % 4;
-    const fila = Math.floor(contadorExtra / 4);
-    nodo.position.set(origenX + col * 2.2, 0.02, origenZ + fila * 2.2);
-    contadorExtra++;
-
-    nodo.getChildMeshes().forEach((m) => {
-      m.isPickable = true;
+  const piecesMap = (piezasExtra instanceof Map) ? piezasExtra : (piezasExtra?.pieces || new Map());
+  piecesMap.forEach((node, name) => {
+    node.position.addInPlace(new Vector3(-6.2, 0, -4.5));
+    node.getChildMeshes().forEach(m => {
+      shadowGenerator.addShadowCaster(m);
       m.metadata = {
         esHerramienta: true,
-        id: nombre,
-        ...(nodo.metadata || {})
+        name: name,
+        label: node.metadata?.label || name,
+        category: node.metadata?.category || "herramienta"
       };
     });
-  }
+  });
 
-  const registrarPieza = (config) => {
-    const nodo = config.mesh;
-    nodo.position = config.posAlmacen.clone();
-    nodo.rotation = config.rotAlmacen ? config.rotAlmacen.clone() : Vector3.Zero();
+  // ==========================================
+  // COMPONENTES 3D MECATRÓNICOS MODULARES
+  // ==========================================
+  const componentesVehiculo = [];
+  const defsPiezas = [
+    { id: "c1-01", nombre: "Chasis Tubular y Monocasco", masa: 45, cdA: 0.04, pot: 0, bat: 0, posAlm: new Vector3(4.5, 0.2, 2.0), posRel: new Vector3(0, 0, 0) },
+    { id: "c1-06", nombre: "Asiento de Competición y Arnés", masa: 12, cdA: 0.01, pot: 0, bat: 0, posAlm: new Vector3(6.0, 0.2, 2.0), posRel: new Vector3(0, 0.3, -0.2) },
+    { id: "c5-01", nombre: "Eje Delantero con Manguetas", masa: 14, cdA: 0.02, pot: 0, bat: 0, posAlm: new Vector3(7.5, 0.2, 2.0), posRel: new Vector3(0, 0.1, 1.3) },
+    { id: "c5-04", nombre: "Eje Trasero y Soporte Corona", masa: 16, cdA: 0.02, pot: 0, bat: 0, posAlm: new Vector3(4.5, 0.2, 3.5), posRel: new Vector3(0, 0.1, -1.3) },
+    { id: "c5-05", nombre: "Ruedas Delanteras de Baja Fricción", masa: 18, cdA: 0.03, pot: 0, bat: 0, posAlm: new Vector3(6.0, 0.2, 3.5), posRel: new Vector3(0, 0.15, 1.3), esRueda: true, ruedaTipo: "delantera" },
+    { id: "c5-06", nombre: "Ruedas Traseras Motrices", masa: 18, cdA: 0.03, pot: 0, bat: 0, posAlm: new Vector3(7.5, 0.2, 3.5), posRel: new Vector3(0, 0.15, -1.3), esRueda: true, ruedaTipo: "trasera" },
+    { id: "c4-06", nombre: "Pack de Baterías LiFePO4 5.2 kWh", masa: 55, cdA: 0.01, pot: 0, bat: 5.2, posAlm: new Vector3(4.5, 0.2, 5.0), posRel: new Vector3(0, 0.25, -0.4) },
+    { id: "c4-01", nombre: "Sistema BMS y Sensores de Celda", masa: 4, cdA: 0.005, pot: 0, bat: 0, posAlm: new Vector3(6.0, 0.2, 5.0), posRel: new Vector3(0, 0.45, -0.4) },
+    { id: "c4-02", nombre: "Seguidor de Máxima Potencia (MPPT)", masa: 6, cdA: 0.005, pot: 0, bat: 0, posAlm: new Vector3(7.5, 0.2, 5.0), posRel: new Vector3(0, 0.4, 0.5) },
+    { id: "c3-01", nombre: "Motor Eléctrico BLDC 3.8 kW", masa: 22, cdA: 0.01, pot: 0, bat: 0, posAlm: new Vector3(4.5, 0.2, 6.5), posRel: new Vector3(0, 0.25, -1.1) },
+    { id: "c3-03", nombre: "Inversor Trifásico y Transmisión", masa: 10, cdA: 0.01, pot: 0, bat: 0, posAlm: new Vector3(6.0, 0.2, 6.5), posRel: new Vector3(0, 0.4, -0.9) },
+    { id: "c1-03", nombre: "Estructura Portapaneles Aerodinámica", masa: 20, cdA: 0.02, pot: 0, bat: 0, posAlm: new Vector3(7.5, 0.2, 6.5), posRel: new Vector3(0, 0.75, 0) },
+    { id: "c2-01", nombre: "Arreglo Celdas Fotovoltaicas 4m²", masa: 18, cdA: -0.01, pot: 950, bat: 0, posAlm: new Vector3(9.0, 0.2, 3.5), posRel: new Vector3(0, 0.85, 0) },
+    { id: "c6-04", nombre: "Instrumentación y Telemetría CAN", masa: 8, cdA: 0.005, pot: 0, bat: 0, posAlm: new Vector3(9.0, 0.2, 5.0), posRel: new Vector3(0, 0.55, 0.5) }
+  ];
 
-    const hijos = nodo.getChildMeshes ? nodo.getChildMeshes() : [nodo];
-    hijos.forEach((m) => {
-      m.isPickable = true;
-      m.metadata = { idPieza: config.id, ...(m.metadata || {}) };
+  defsPiezas.forEach((d) => {
+    let nodoPieza = null;
+    try {
+      nodoPieza = createSolarPart(scene, d.id, { labels: false });
+    } catch (e) {
+      console.warn("Fallback procedural para pieza:", d.id);
+    }
+    if (!nodoPieza) {
+      nodoPieza = MeshBuilder.CreateBox("fallback_" + d.id, { width: 0.8, height: 0.4, depth: 0.8 }, scene);
+      nodoPieza.material = pbrLibrary.metal;
+    }
+
+    nodoPieza.position.copyFrom(d.posAlm);
+    nodoPieza.parent = null;
+
+    const meshes = nodoPieza.getChildMeshes ? nodoPieza.getChildMeshes() : [nodoPieza];
+    meshes.forEach((m) => {
+      m.metadata = { idPieza: d.id, nombre: d.nombre, fase: "Fase E (Ingeniería)" };
+      m.receiveShadows = true;
+      shadowGenerator.addShadowCaster(m);
+
+      if (d.id === "c2-01") m.material = pbrLibrary.solar;
+      else if (d.id.startsWith("c5-05") || d.id.startsWith("c5-06")) m.material = pbrLibrary.goma;
+      else if (d.id === "c3-01" || d.id === "c3-03") m.material = pbrLibrary.copper;
+      else if (d.id === "c1-01") m.material = pbrLibrary.metal;
     });
 
     componentesVehiculo.push({
-      ...config,
-      nodo,
+      id: d.id,
+      nombre: d.nombre,
+      fase: "Fase E (Ingeniería)",
+      nodo: nodoPieza,
       montado: false,
-      posFinal: config.posCarro.clone(),
-      rotFinal: config.rotCarro ? config.rotCarro.clone() : Vector3.Zero()
+      posAlmacen: d.posAlm.clone(),
+      posRelativaAlCarro: d.posRel.clone(),
+      rotFinal: Vector3.Zero(),
+      masa: d.masa,
+      deltaCdA: d.cdA,
+      potenciaSolar: d.pot,
+      capacidadBat: d.bat,
+      esRueda: !!d.esRueda,
+      ruedaTipo: d.ruedaTipo || null
     });
-  };
-
-  // ========================================================
-  // COMPONENTES IMPORTADOS DE /piezas/solar-piezas.js
-  // ========================================================
-  // 1. Chasis tubular
-  registrarPieza({
-    id: "c1-01",
-    nombre: "1.1 · Chasis / Estructura Portante",
-    fase: "Fase 1: Estructura Principal",
-    descripcion: "Bastidor spaceframe con arco de seguridad y bandeja portante.",
-    masa: 35.0,
-    deltaCdA: 0.04,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c1-01", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima, 0.45, zCarro - 2.8),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.1, posCarroBase.z),
-    vectorExplosion: new Vector3(0, 0, 0)
-  });
-
-  // 2. Asiento y arnés de 5 puntos
-  registrarPieza({
-    id: "c1-06",
-    nombre: "1.6 · Asiento y Arnés de Sujeción",
-    fase: "Fase 1: Estructura Principal",
-    descripcion: "Asiento bucket con rieles de ajuste y arnés de 5 puntos de seguridad.",
-    masa: 12.0,
-    deltaCdA: 0.02,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c1-06", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima + 0.8, 0.45, zCarro - 1.4),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.2, posCarroBase.z - 0.2),
-    vectorExplosion: new Vector3(0, 0.35, 0)
-  });
-
-  // 3. Volante de competición
-  registrarPieza({
-    id: "c5-01",
-    nombre: "5.1 · Volante de Competición",
-    fase: "Fase 1: Estructura Principal",
-    descripcion: "Volante de 3 radios con quick-release y aro antideslizante.",
-    masa: 2.5,
-    deltaCdA: 0.01,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c5-01", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima - 0.8, 0.45, zCarro - 1.4),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.42, posCarroBase.z + 0.35),
-    vectorExplosion: new Vector3(0, 0.45, 0.2)
-  });
-
-  // 4. Suspensión de doble horquilla
-  registrarPieza({
-    id: "c5-04",
-    nombre: "5.4 · Sistema de Suspensión Pushrod",
-    fase: "Fase 2: Suspensión y Dirección",
-    descripcion: "Esquina con doble horquilla, mangueta, buje y pushrod hacia torreta.",
-    masa: 16.0,
-    deltaCdA: 0.02,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c5-04", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima - 0.8, 0.45, zCarro),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.15, posCarroBase.z + 0.95),
-    vectorExplosion: new Vector3(0, 0, 0.5)
-  });
-
-  // 5. Amortiguadores coilover
-  registrarPieza({
-    id: "c5-05",
-    nombre: "5.5 · Amortiguadores y Resortes",
-    fase: "Fase 2: Suspensión y Dirección",
-    descripcion: "Monoamortiguador coilover con vástago cromado y copelas.",
-    masa: 7.0,
-    deltaCdA: 0.01,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c5-05", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima + 0.8, 0.45, zCarro),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.25, posCarroBase.z + 0.8),
-    vectorExplosion: new Vector3(0, 0.3, 0.4)
-  });
-
-  // 6. Frenos de disco ventilados
-  registrarPieza({
-    id: "c5-06",
-    nombre: "5.6 · Sistema de Frenos",
-    fase: "Fase 2: Suspensión y Dirección",
-    descripcion: "Disco ventilado perforado con cáliper deportivo y latiguillo hidráulico.",
-    masa: 6.5,
-    deltaCdA: 0.005,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c5-06", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima, 0.45, zCarro),
-    posCarro: new Vector3(posCarroBase.x + 0.45, posCarroBase.y + 0.12, posCarroBase.z + 0.95),
-    vectorExplosion: new Vector3(0.5, 0, 0.2)
-  });
-
-  // 7. Ruedas solares
-  registrarPieza({
-    id: "c4-06",
-    nombre: "4.6 · Ruedas Solares de Alta Presión",
-    fase: "Fase 3: Tren Motriz y Ruedas",
-    descripcion: "Rin monocasco de baja inercia y neumático de bajísima rodadura (Crr = 0.003).",
-    masa: 14.0,
-    deltaCdA: 0.015,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c4-06", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima + 0.8, 0.45, zCarro + 1.3),
-    posCarro: new Vector3(posCarroBase.x + 0.52, posCarroBase.y + 0.15, posCarroBase.z + 0.95),
-    vectorExplosion: new Vector3(0.7, 0, 0)
-  });
-
-  // 8. Motor de tracción BLDC
-  registrarPieza({
-    id: "c4-01",
-    nombre: "4.1 · Motor Eléctrico de Tracción",
-    fase: "Fase 3: Tren Motriz y Ruedas",
-    descripcion: "Motor síncrono BLDC con aletas de refrigeración y sensor Hall integrado.",
-    masa: 18.0,
-    deltaCdA: 0.01,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c4-01", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima - 0.8, 0.45, zCarro + 1.3),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.18, posCarroBase.z - 1.1),
-    vectorExplosion: new Vector3(0, 0, -0.6)
-  });
-
-  // 9. Controlador / Inversor de motor
-  registrarPieza({
-    id: "c4-02",
-    nombre: "4.2 · Controlador del Motor",
-    fase: "Fase 3: Tren Motriz y Ruedas",
-    descripcion: "Inversor de potencia trifásico con >98% de rendimiento.",
-    masa: 8.5,
-    deltaCdA: 0.0,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c4-02", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima, 0.45, zCarro + 1.3),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.32, posCarroBase.z - 0.9),
-    vectorExplosion: new Vector3(0, 0.3, -0.3)
-  });
-
-  // 10. Batería de tracción Li-ion
-  registrarPieza({
-    id: "c3-01",
-    nombre: "3.1 · Batería de Tracción Li-Ion",
-    fase: "Fase 4: Almacenamiento y Gestión",
-    descripcion: "Pack modular 5.0 kWh con celdas 18650 y busbars de cobre.",
-    masa: 28.0,
-    deltaCdA: 0.0,
-    potenciaSolar: 0,
-    capacidadBat: 5.0,
-    mesh: createSolarPart(scene, "c3-01", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima + 0.8, 0.45, zCarro + 2.5),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.12, posCarroBase.z - 0.5),
-    vectorExplosion: new Vector3(0, -0.25, 0)
-  });
-
-  // 11. BMS y MPPT
-  registrarPieza({
-    id: "c3-03",
-    nombre: "3.3 · Controlador MPPT Solar",
-    fase: "Fase 4: Almacenamiento y Gestión",
-    descripcion: "Controlador MPPT con aletas disipadoras y algoritmo P&O.",
-    masa: 6.0,
-    deltaCdA: 0.0,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c3-03", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima - 0.8, 0.45, zCarro + 2.5),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.35, posCarroBase.z - 0.65),
-    vectorExplosion: new Vector3(0, 0.35, -0.2)
-  });
-
-  // 12. Carrocería aerodinámica
-  registrarPieza({
-    id: "c1-03",
-    nombre: "1.3 · Paneles de Carrocería Composite",
-    fase: "Fase 5: Carrocería Aerodinámica",
-    descripcion: "Carenado aerodinámico optimizado CFD con bajísimo arrastre.",
-    masa: 25.0,
-    deltaCdA: -0.12,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c1-03", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima, 1.2, zCarro - 1.2),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.05, posCarroBase.z),
-    vectorExplosion: new Vector3(0, 0.6, 0)
-  });
-
-  // 13. Celdas solares
-  registrarPieza({
-    id: "c2-01",
-    nombre: "2.1 · Celdas Fotovoltaicas Monocristalinas",
-    fase: "Fase 6: Sistema Solar y Telemetría",
-    descripcion: "Arreglo de silicio monocristalino SunPower de alta eficiencia (1200 W pico).",
-    masa: 11.0,
-    deltaCdA: 0.002,
-    potenciaSolar: 1200,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c2-01", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima, 1.2, zCarro + 0.6),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.58, posCarroBase.z),
-    vectorExplosion: new Vector3(0, 0.9, 0)
-  });
-
-  // 14. Telemetría e instrumentación
-  registrarPieza({
-    id: "c6-04",
-    nombre: "6.4 · Instrumentación y Telemetría",
-    fase: "Fase 6: Sistema Solar y Telemetría",
-    descripcion: "Pantalla con velocidad, SOC, potencia solar y módulo telemétrico.",
-    masa: 4.5,
-    deltaCdA: 0.005,
-    potenciaSolar: 0,
-    capacidadBat: 0,
-    mesh: createSolarPart(scene, "c6-04", { scale: 1.0 }),
-    posAlmacen: new Vector3(xTarima, 1.2, zCarro + 2.2),
-    posCarro: new Vector3(posCarroBase.x, posCarroBase.y + 0.46, posCarroBase.z + 0.2),
-    vectorExplosion: new Vector3(0, 0.7, 0.2)
   });
 
   // ==========================================
-  // 8. LÓGICA DE ENSAMBLAJE Y ANIMACIONES
+  // 5. MOTOR FÍSICO Y GESTOR STEAM
   // ==========================================
-  let estadoExplosion = false;
+  const physics = new SolarVehiclePhysics();
+  let enModoPista = false;
+
+  // ==========================================
+  // GESTOR DE PERSISTENCIA Y PROGRESO (AUTOGUARDADO / JSON / CSV)
+  // ==========================================
+  const progressMgr = new ProgressManager();
+
+  const steam = new SteamManager({
+    onStateChange: () => actualizarUI(),
+    onCarroceriaChange: (concept, cdA, colorHex) => {
+      physics.setBodyworkCdA(cdA);
+      pbrLibrary.carroceria.albedoColor = Color3.FromHexString(colorHex);
+      casco.material.albedoColor = Color3.FromHexString(colorHex);
+      carroceriaConceptMesh.setEnabled(true);
+      if (concept === "bullet") {
+        carroceriaConceptMesh.scaling.set(0.88, 0.85, 1.15);
+      } else if (concept === "catamaran") {
+        carroceriaConceptMesh.scaling.set(1.22, 0.78, 1.0);
+      } else {
+        carroceriaConceptMesh.scaling.set(1.0, 1.0, 1.0);
+      }
+      actualizarUI();
+    },
+    onBmsChange: (vMax, vMin, regenRatio) => {
+      physics.setBmsConfig(vMax, vMin, regenRatio);
+      actualizarUI();
+    },
+    onSolarChange: (irrad, angleDeg, cellTemp) => {
+      physics.setSolarEnvironment(irrad, angleDeg, cellTemp);
+      dirSun.direction = new Vector3(
+        -Math.cos((angleDeg * Math.PI) / 180),
+        -Math.sin((angleDeg * Math.PI) / 180),
+        0.35
+      );
+      actualizarUI();
+    }
+  });
+
+  // Restaurar automáticamente el estado de ensamblaje guardado previamente (Persistencia en Recarga)
+  const savedAssembly = progressMgr.loadFromStorage();
+  if (savedAssembly) {
+    progressMgr.applyState(savedAssembly, componentesVehiculo, steam, physics, carChassisBody);
+  }
+
+  // ==========================================
+  // 6. LÓGICA DE ENSAMBLAJE Y ANIMACIÓN INTERACTIVA
+  // ==========================================
   let animando = false;
 
-  const animarTransformacion = (nodo, posDestino, rotDestino, callback) => {
-    const fps = 60;
-    const frames = 30;
+  const montarPieza = (index) => {
+    if (steam.isTeacherMode) {
+      alert("⚠️ Modo Profesor activo: Solo lectura habilitada.");
+      return;
+    }
+    if (index < 0 || index >= componentesVehiculo.length) return;
+    const p = componentesVehiculo[index];
+    if (p.montado || animando) return;
+
+    vehicleAudio.playAssemblyClick();
+    animando = true;
+    p.nodo.parent = carChassisBody;
 
     Animation.CreateAndStartAnimation(
-      "posAnim_" + nodo.name,
-      nodo,
+      "posAnim_" + p.id,
+      p.nodo,
       "position",
-      fps,
-      frames,
-      nodo.position.clone(),
-      posDestino,
+      60,
+      25,
+      p.nodo.position.clone(),
+      p.posRelativaAlCarro,
       Animation.ANIMATIONLOOPMODE_CONSTANT,
       null,
       () => {
-        if (callback) callback();
+        p.montado = true;
+        animando = false;
+        highlightLayer.addMesh(p.nodo.getChildMeshes ? p.nodo.getChildMeshes()[0] : p.nodo, Color3.Green());
+        setTimeout(() => highlightLayer.removeAllMeshes(), 600);
+
+        const montadas = componentesVehiculo.filter(c => c.montado).length;
+        if (montadas >= componentesVehiculo.length) {
+          steam.unlockNextPhase("E");
+        }
+        progressMgr.saveToStorage(componentesVehiculo, steam, physics, true);
+        actualizarUI();
       }
     );
-
-    if (rotDestino) {
-      Animation.CreateAndStartAnimation(
-        "rotAnim_" + nodo.name,
-        nodo,
-        "rotation",
-        fps,
-        frames,
-        nodo.rotation.clone(),
-        rotDestino,
-        Animation.ANIMATIONLOOPMODE_CONSTANT
-      );
-    }
-  };
-
-  const montarPieza = (index) => {
-    if (index < 0 || index >= componentesVehiculo.length) return;
-    const p = componentesVehiculo[index];
-    if (p.montado) return;
-
-    animando = true;
-    animarTransformacion(p.nodo, p.posFinal, p.rotFinal, () => {
-      p.montado = true;
-      animando = false;
-      highlightLayer.addMesh(p.nodo.getChildMeshes ? p.nodo.getChildMeshes()[0] : p.nodo, Color3.Green());
-      setTimeout(() => {
-        highlightLayer.removeAllMeshes();
-      }, 700);
-      actualizarUI();
-    });
   };
 
   const desmontarPieza = (index) => {
+    if (steam.isTeacherMode) return;
     if (index < 0 || index >= componentesVehiculo.length) return;
     const p = componentesVehiculo[index];
-    if (!p.montado) return;
+    if (!p.montado || animando) return;
 
+    vehicleAudio.playAssemblyClick();
     animando = true;
-    animarTransformacion(p.nodo, p.posAlmacen, p.rotAlmacen || Vector3.Zero(), () => {
-      p.montado = false;
-      animando = false;
-      actualizarUI();
-    });
+    p.nodo.parent = null;
+
+    Animation.CreateAndStartAnimation(
+      "posAnim_" + p.id,
+      p.nodo,
+      "position",
+      60,
+      25,
+      p.nodo.position.clone(),
+      p.posAlmacen,
+      Animation.ANIMATIONLOOPMODE_CONSTANT,
+      null,
+      () => {
+        p.montado = false;
+        animando = false;
+        progressMgr.saveToStorage(componentesVehiculo, steam, physics, true);
+        actualizarUI();
+      }
+    );
   };
 
   const montarSiguiente = () => {
-    if (animando) return;
-    const siguiente = componentesVehiculo.find((c) => !c.montado);
+    if (animando || steam.isTeacherMode) return;
+    const siguiente = componentesVehiculo.find(c => !c.montado);
     if (siguiente) {
-      const idx = componentesVehiculo.indexOf(siguiente);
-      montarPieza(idx);
+      montarPieza(componentesVehiculo.indexOf(siguiente));
     }
   };
 
-  const desmontarUltima = () => {
-    if (animando) return;
-    for (let i = componentesVehiculo.length - 1; i >= 0; i--) {
-      if (componentesVehiculo[i].montado) {
-        desmontarPieza(i);
-        break;
-      }
-    }
-  };
-
-  const alternarVistaExplosionada = () => {
-    if (animando) return;
-    estadoExplosion = !estadoExplosion;
-
-    componentesVehiculo.forEach((p) => {
-      if (!p.montado) return;
-      let posMeta = p.posFinal.clone();
-      if (estadoExplosion) {
-        posMeta.addInPlace(p.vectorExplosion);
-      }
-      animarTransformacion(p.nodo, posMeta, p.rotFinal);
+  const desarmarTodo = () => {
+    if (steam.isTeacherMode) return;
+    steam.confirmReset(() => {
+      componentesVehiculo.forEach((p, idx) => {
+        if (p.montado) desmontarPieza(idx);
+      });
+      setTimeout(() => {
+        progressMgr.saveToStorage(componentesVehiculo, steam, physics, true);
+      }, 500);
     });
-
-    actualizarUI();
   };
 
-  // Clic interactivo sobre la escena
+  // Clic interactivo
   scene.onPointerDown = (evt, pickResult) => {
+    vehicleAudio.init(); // Iniciar contexto de audio con la primera interacción del usuario
     if (pickResult.hit && pickResult.pickedMesh) {
       const nombreMesh = pickResult.pickedMesh.name;
-      
       if (nombreMesh === "porton") {
         togglePorton();
         return;
       }
-
-      if (nombreMesh.startsWith("herramienta_")) {
-        usarHerramienta(nombreMesh);
-        return;
-      }
-
-      if (nombreMesh === "gatoHidraulico") {
-        const animGato = new Animation("animGato", "position.y", 30, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CONSTANT);
-        animGato.setKeys([
-          { frame: 0, value: 0.15 },
-          { frame: 15, value: 0.35 },
-          { frame: 30, value: 0.15 }
-        ]);
-        pickResult.pickedMesh.animations = [animGato];
-        scene.beginAnimation(pickResult.pickedMesh, 0, 30, false, 1.0);
-        return;
-      }
-
       let meta = pickResult.pickedMesh.metadata;
-      if (meta && meta.esHerramienta) {
-        const cat = meta.category === "seguridad" ? "🦺 Seguridad" : "🔧 Herramienta";
-        const label = meta.label || meta.name || "Equipo";
-        const tooltip = document.getElementById("tooltip-guia");
-        if (tooltip) tooltip.innerText = `${cat}: ${label} (Disponible en taller)`;
-        highlightLayer.removeAllMeshes();
-        highlightLayer.addMesh(pickResult.pickedMesh, Color3.Yellow());
-        setTimeout(() => highlightLayer.removeAllMeshes(), 1000);
-        return;
-      }
       if (!meta && pickResult.pickedMesh.parent) {
         meta = pickResult.pickedMesh.parent.metadata;
       }
-
+      if (meta && meta.esHerramienta) {
+        const cat = meta.category === "seguridad" ? "🦺 Seguridad" : "🔧 Herramienta";
+        const tooltip = document.getElementById("tooltip-guia");
+        if (tooltip) tooltip.innerText = `${cat}: ${meta.label || meta.name} (Lista para usar)`;
+        highlightLayer.removeAllMeshes();
+        highlightLayer.addMesh(pickResult.pickedMesh, Color3.Yellow());
+        setTimeout(() => highlightLayer.removeAllMeshes(), 800);
+        return;
+      }
       if (meta && meta.idPieza) {
-        const idx = componentesVehiculo.findIndex((c) => c.id === meta.idPieza);
+        const idx = componentesVehiculo.findIndex(c => c.id === meta.idPieza);
         if (idx !== -1) {
-          const comp = componentesVehiculo[idx];
-          if (!comp.montado) {
-            montarPieza(idx);
-          } else {
-            desmontarPieza(idx);
-          }
+          if (!componentesVehiculo[idx].montado) montarPieza(idx);
+          else desmontarPieza(idx);
         }
       }
     }
@@ -785,17 +686,14 @@ const createScene = () => {
   // Portón del taller
   let portonAbierto = false;
   let animandoPorton = false;
-
   const togglePorton = () => {
     if (animandoPorton) return;
     animandoPorton = true;
-
     const anim = new Animation("animPorton", "position.y", 30, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CONSTANT);
     anim.setKeys([
       { frame: 0, value: porton.position.y },
       { frame: 30, value: portonAbierto ? posCerradoY : posAbiertoY }
     ]);
-
     porton.animations = [anim];
     scene.beginAnimation(porton, 0, 30, false, 1.0, () => {
       portonAbierto = !portonAbierto;
@@ -804,119 +702,260 @@ const createScene = () => {
     });
   };
 
-  const usarHerramienta = (nombreHerramienta) => {
-    let meshAAnimar = scene.getMeshByName(nombreHerramienta);
-    if (!meshAAnimar) return;
-
-    const animUso = new Animation("animUso", "rotation.y", 30, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CONSTANT);
-    animUso.setKeys([
-      { frame: 0, value: meshAAnimar.rotation.y },
-      { frame: 15, value: meshAAnimar.rotation.y + Math.PI * 2 },
-      { frame: 30, value: meshAAnimar.rotation.y }
-    ]);
-
-    meshAAnimar.animations = [animUso];
-    scene.beginAnimation(meshAAnimar, 0, 30, false, 1.0);
-  };
-
-  // Teclado
+  // ==========================================
+  // 7. CONTROLES Y TELEMETRÍA EN PISTA
+  // ==========================================
+  const keyState = {};
   window.addEventListener("keydown", (e) => {
+    vehicleAudio.init();
+    keyState[e.key.toLowerCase()] = true;
+    keyState[e.code] = true;
+
     if (e.key === "e" || e.key === "E") togglePorton();
-    if (e.key === "f" || e.key === "F" || e.code === "Space") {
-      e.preventDefault();
-      montarSiguiente();
+    if (e.key === "f" || e.key === "F") montarSiguiente();
+    if (e.key === "t" || e.key === "T") toggleModoPista();
+    if (e.key === "r" || e.key === "R") {
+      physics.resetVehicle(new Vector3(0, 0.35, enModoPista ? 20 : -4));
     }
-    if (e.key === "z" || e.key === "Z") desmontarUltima();
-    if (e.key === "x" || e.key === "X") alternarVistaExplosionada();
   });
 
+  window.addEventListener("keyup", (e) => {
+    keyState[e.key.toLowerCase()] = false;
+    keyState[e.code] = false;
+  });
+
+  const toggleModoPista = () => {
+    vehicleAudio.init();
+    enModoPista = !enModoPista;
+    if (enModoPista) {
+      if (!portonAbierto) togglePorton();
+      physics.resetVehicle(new Vector3(0, 0.35, 20));
+      carRoot.position.set(0, 0.35, 20);
+      carRoot.rotation.set(0, 0, 0);
+      setCamaraMode("track");
+    } else {
+      physics.resetVehicle(new Vector3(0, 0.35, -4));
+      carRoot.position.set(0, 0.35, -4);
+      carRoot.rotation.set(0, 0, 0);
+      setCamaraMode("fps");
+    }
+    actualizarUI();
+  };
+
   // ==========================================
-  // 9. PANEL DE TELEMETRÍA Y HUD EN VIVO
+  // 8. DASHBOARD PROFESIONAL DE TELEMETRÍA (UI/UX)
   // ==========================================
-  const contenedorUI = document.createElement("div");
-  contenedorUI.id = "solar-workshop-ui";
-  contenedorUI.innerHTML = `
+  const uiContainer = document.createElement("div");
+  uiContainer.id = "solar-app-container";
+  uiContainer.innerHTML = `
     <style>
-      #solar-workshop-ui {
+      #solar-app-container {
         position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
+        inset: 0;
         pointer-events: none;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #fff;
+        user-select: none;
       }
-      .panel-hud {
+      .steam-top-bar {
         position: absolute;
-        top: 20px;
+        top: 15px;
+        left: 20px;
         right: 20px;
-        width: 320px;
-        background: rgba(18, 22, 30, 0.88);
-        backdrop-filter: blur(8px);
-        border: 1px solid rgba(80, 150, 255, 0.35);
-        border-radius: 12px;
-        padding: 18px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
         pointer-events: auto;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
       }
-      .hud-title {
-        font-size: 16px;
+      .steam-phases-nav {
+        display: flex;
+        gap: 8px;
+        background: rgba(10, 14, 22, 0.88);
+        backdrop-filter: blur(12px);
+        padding: 6px 14px;
+        border-radius: 30px;
+        border: 1px solid rgba(80, 150, 255, 0.35);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.5);
+      }
+      .steam-pill {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.08);
+        color: #a0aec0;
+        border: 1px solid transparent;
+        transition: all 0.2s ease;
+      }
+      .steam-pill:hover { background: rgba(0, 122, 255, 0.35); color: #fff; }
+      .steam-pill.unlocked { color: #5ac8fa; }
+      .steam-pill.completed { background: rgba(48, 209, 88, 0.2); color: #30d158; border-color: rgba(48, 209, 88, 0.4); }
+      .steam-pill.active { border-color: #ffd60a; color: #ffd60a; font-weight: 700; box-shadow: 0 0 12px rgba(255, 214, 10, 0.35); }
+      .steam-pill:focus-visible { outline: 2px solid #5ac8fa; outline-offset: 2px; }
+
+      .top-right-actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .badge-role {
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: #fff;
+        transition: all 0.2s;
+      }
+            .autosave-pill {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(10, 20, 30, 0.85);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(80, 200, 120, 0.4);
+        padding: 5px 12px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #72d5a3;
+      }
+      .autosave-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #30d158;
+        box-shadow: 0 0 8px #30d158;
+        display: inline-block;
+      }
+      .autosave-dot.saving {
+        background: #ffd60a;
+        box-shadow: 0 0 8px #ffd60a;
+      }
+      .btn-storage {
+        background: rgba(18, 28, 44, 0.9);
+        backdrop-filter: blur(10px);
+        color: #ffffff;
+        border: 1px solid rgba(90, 160, 255, 0.35);
+        border-radius: 20px;
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        transition: all 0.2s ease;
+      }
+      .btn-storage:hover {
+        background: rgba(0, 122, 255, 0.45);
+        border-color: #5ac8fa;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 15px rgba(0, 122, 255, 0.3);
+      }
+      .btn-storage:focus-visible {
+        outline: 2px solid #5ac8fa;
+        outline-offset: 2px;
+      }
+      .badge-role.teacher {
+        background: linear-gradient(90deg, #ff9500, #ff3b30);
+        border-color: #ff9500;
+      }
+
+      /* Panel de Telemetría Estilo Cockpit / Motec */
+      .panel-telemetria {
+        position: absolute;
+        top: 75px;
+        right: 20px;
+        width: 330px;
+        background: rgba(10, 14, 22, 0.92);
+        backdrop-filter: blur(14px);
+        border: 1px solid rgba(80, 150, 255, 0.4);
+        border-radius: 16px;
+        padding: 16px 20px;
+        pointer-events: auto;
+        box-shadow: 0 15px 40px rgba(0,0,0,0.65);
+      }
+      .telem-title {
+        font-size: 14px;
         font-weight: 700;
         color: #5ac8fa;
         text-transform: uppercase;
         letter-spacing: 1px;
-        border-bottom: 1px solid rgba(255,255,255,0.15);
-        padding-bottom: 8px;
-        margin-bottom: 14px;
         display: flex;
         justify-content: space-between;
         align-items: center;
+        margin-bottom: 10px;
+        border-bottom: 1px solid rgba(255,255,255,0.12);
+        padding-bottom: 6px;
       }
-      .kpi-row {
+      /* Barra de LEDs de RPM */
+      .rpm-led-bar {
+        display: flex;
+        gap: 3px;
+        height: 6px;
+        margin-bottom: 12px;
+      }
+      .rpm-led {
+        flex: 1;
+        background: rgba(255,255,255,0.12);
+        border-radius: 2px;
+        transition: background 0.1s;
+      }
+      .rpm-led.lit-green { background: #30d158; box-shadow: 0 0 6px #30d158; }
+      .rpm-led.lit-yellow { background: #ffd60a; box-shadow: 0 0 6px #ffd60a; }
+      .rpm-led.lit-red { background: #ff453a; box-shadow: 0 0 6px #ff453a; }
+
+      .telem-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin: 7px 0;
+        margin: 5px 0;
         font-size: 13px;
       }
-      .kpi-label { color: #a0aec0; }
-      .kpi-value { font-weight: 700; color: #ffffff; }
-      .kpi-unit { color: #5ac8fa; font-size: 11px; margin-left: 3px; }
-      .progreso-barra-bg {
-        width: 100%;
-        height: 10px;
-        background: rgba(255,255,255,0.12);
-        border-radius: 5px;
-        overflow: hidden;
-        margin: 12px 0 6px 0;
+      .telem-label { color: #a0aec0; }
+      .telem-val { font-weight: 700; color: #fff; }
+      .telem-unit { color: #5ac8fa; font-size: 11px; margin-left: 3px; }
+
+      /* G-Meter y Flujo de Energía */
+      .g-meter-box {
+        display: flex;
+        justify-content: space-between;
+        background: rgba(0,0,0,0.3);
+        border-radius: 8px;
+        padding: 8px 12px;
+        margin-top: 10px;
+        font-size: 12px;
       }
-      .progreso-barra-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #30d158, #007aff);
-        width: 0%;
-        transition: width 0.3s ease;
-      }
-      .panel-controles {
+
+      /* Barra de Controles Inferior */
+      .bottom-control-bar {
         position: absolute;
         bottom: 25px;
         left: 50%;
         transform: translateX(-50%);
-        background: rgba(18, 22, 30, 0.9);
-        border: 1px solid rgba(255,255,255,0.2);
-        border-radius: 30px;
-        padding: 8px 18px;
+        background: rgba(12, 16, 24, 0.94);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 35px;
+        padding: 8px 22px;
         display: flex;
-        gap: 10px;
+        gap: 12px;
         pointer-events: auto;
-        box-shadow: 0 8px 25px rgba(0,0,0,0.6);
+        box-shadow: 0 10px 35px rgba(0,0,0,0.7);
       }
-      .btn-workshop {
-        background: rgba(45, 55, 72, 0.9);
+      .btn-action {
+        background: rgba(45, 55, 72, 0.85);
         color: #ffffff;
-        border: 1px solid rgba(255,255,255,0.15);
+        border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 20px;
-        padding: 8px 16px;
+        padding: 8px 18px;
         font-size: 12px;
         font-weight: 600;
         cursor: pointer;
@@ -925,162 +964,294 @@ const createScene = () => {
         gap: 6px;
         transition: all 0.2s ease;
       }
-      .btn-workshop:hover {
-        background: #007aff;
-        border-color: #5ac8fa;
-        transform: translateY(-1px);
-      }
-      .btn-workshop.activo {
-        background: #ff9500;
-        color: #000;
-        font-weight: 700;
-      }
+      .btn-action:hover { background: #007aff; border-color: #5ac8fa; transform: translateY(-1px); }
+      .btn-action:focus-visible { outline: 2px solid #5ac8fa; outline-offset: 2px; }
+      .btn-action.pista { background: #ff9500; color: #000; font-weight: 700; }
+      .btn-action.danger { background: rgba(235, 87, 87, 0.2); border-color: #eb5757; color: #ff8080; }
+      .btn-action.danger:hover { background: #eb5757; color: #fff; }
+
       .tooltip-info {
         position: absolute;
         bottom: 85px;
         left: 50%;
         transform: translateX(-50%);
-        background: rgba(10, 15, 25, 0.85);
-        border: 1px solid rgba(90, 200, 250, 0.3);
+        background: rgba(10, 15, 25, 0.92);
+        border: 1px solid rgba(90, 200, 250, 0.4);
         border-radius: 8px;
-        padding: 8px 16px;
+        padding: 8px 20px;
         font-size: 12px;
         color: #e2e8f0;
         pointer-events: none;
       }
     </style>
 
-    <div class="panel-hud">
-      <div class="hud-title">
-        <span>Taller Solar Telemetría</span>
-        <span id="hud-porcentaje" style="color: #30d158; font-size: 14px;">0%</span>
+    <!-- Barra Superior STEAM -->
+    <div class="steam-top-bar">
+      <div class="steam-phases-nav">
+        <button id="pill-M" class="steam-pill" tabindex="0">📐 M: Matemáticas</button>
+        <button id="pill-S" class="steam-pill" tabindex="0">☀️ S: Ciencia</button>
+        <button id="pill-E" class="steam-pill" tabindex="0">🛠️ E: Ingeniería</button>
+        <button id="pill-T" class="steam-pill" tabindex="0">💻 T: Tecnología</button>
+        <button id="pill-A" class="steam-pill" tabindex="0">🎨 A: Arte</button>
       </div>
 
-      <div class="progreso-barra-bg">
-        <div id="hud-barra" class="progreso-barra-fill"></div>
-      </div>
-      <div id="hud-fase-texto" style="font-size: 11px; color: #718096; margin-bottom: 12px;">Fase: Esperando ensamblaje</div>
-
-      <div class="kpi-row">
-        <span class="kpi-label">Masa Total (m):</span>
-        <span><span id="kpi-masa" class="kpi-value">0</span><span class="kpi-unit">kg</span></span>
-      </div>
-      <div class="kpi-row">
-        <span class="kpi-label">Potencia Solar Pico (Ps):</span>
-        <span><span id="kpi-potencia" class="kpi-value" style="color: #ffd60a;">0</span><span class="kpi-unit">W</span></span>
-      </div>
-      <div class="kpi-row">
-        <span class="kpi-label">Capacidad Batería (Ecap):</span>
-        <span><span id="kpi-bateria" class="kpi-value" style="color: #30d158;">0.0</span><span class="kpi-unit">kWh</span></span>
-      </div>
-      <div class="kpi-row">
-        <span class="kpi-label">Arrastre Aerodinámico (Cd·A):</span>
-        <span><span id="kpi-cda" class="kpi-value">0.85</span><span class="kpi-unit">m²</span></span>
-      </div>
-      <div class="kpi-row">
-        <span class="kpi-label">Velocidad Crucero Est.:</span>
-        <span><span id="kpi-velocidad" class="kpi-value" style="color: #5ac8fa;">0</span><span class="kpi-unit">km/h</span></span>
-      </div>
-      <div class="kpi-row">
-        <span class="kpi-label">Límite Vuelco Lateral (acorr):</span>
-        <span><span id="kpi-vuelco" class="kpi-value">--</span><span class="kpi-unit">g</span></span>
+      <div class="top-right-actions">
+        <div id="autosave-status" class="autosave-pill" title="El avance de ensamblaje se guarda automáticamente en tu navegador">
+          <span class="autosave-dot saved"></span>
+          <span id="autosave-text">Progreso guardado</span>
+        </div>
+        <button id="btn-export-json" class="btn-storage" title="Guardar y descargar copia de seguridad (.JSON)" tabindex="0">💾 Guardar (.JSON)</button>
+        <button id="btn-export-csv" class="btn-storage" title="Exportar reporte técnico de piezas (.CSV para Excel)" tabindex="0">📊 Exportar (.CSV)</button>
+        <button id="btn-import-json" class="btn-storage" title="Restaurar progreso desde un archivo .JSON previo" tabindex="0">📂 Cargar (.JSON)</button>
+        <input type="file" id="input-import-json" accept=".json,application/json" style="display:none;" />
+        <button id="btn-toggle-role" class="badge-role" tabindex="0">👨‍🎓 Modo Alumno</button>
+        <button id="btn-lang-toggle" class="badge-role" tabindex="0">🌐 ES</button>
       </div>
     </div>
 
-    <div class="panel-controles">
-      <button id="btn-montar" class="btn-workshop">➕ Montar Pieza (F)</button>
-      <button id="btn-desmontar" class="btn-workshop">➖ Desmontar (Z)</button>
-      <button id="btn-explosion" class="btn-workshop">💥 Vista Explosionada (X)</button>
-      <button id="btn-camara" class="btn-workshop">🎥 Cambiar Cámara (C)</button>
-      <button id="btn-porton" class="btn-workshop">🚪 Portón (E)</button>
+    <!-- Panel de Telemetría Profesional -->
+    <div class="panel-telemetria">
+      <div class="telem-title">
+        <span id="ui-mode-label">Taller Solar 3D</span>
+        <span id="telem-speed" style="color: #30d158; font-size: 16px;">0.0 km/h</span>
+      </div>
+
+      <!-- Barra LED de Tacómetro -->
+      <div id="rpm-leds" class="rpm-led-bar">
+        ${Array.from({ length: 12 }).map((_, i) => `<div class="rpm-led" data-idx="${i}"></div>`).join('')}
+      </div>
+
+      <div class="telem-row">
+        <span class="telem-label">Potencia Motor:</span>
+        <span><span id="telem-motor-pow" class="telem-val">0</span><span class="telem-unit">W</span></span>
+      </div>
+      <div class="telem-row">
+        <span class="telem-label">Régimen Rotor:</span>
+        <span><span id="telem-motor-rpm" class="telem-val">0</span><span class="telem-unit">RPM</span></span>
+      </div>
+      <div class="telem-row">
+        <span class="telem-label">Aporte Solar (P_s):</span>
+        <span><span id="telem-solar" class="telem-val" style="color: #ffd60a;">0</span><span class="telem-unit">W</span></span>
+      </div>
+      <div class="telem-row">
+        <span class="telem-label">Batería (SoC):</span>
+        <span><span id="telem-soc" class="telem-val" style="color: #30d158;">88.0</span><span class="telem-unit">%</span></span>
+      </div>
+      <div class="telem-row">
+        <span class="telem-label">Tensión de Pack:</span>
+        <span><span id="telem-voltage" class="telem-val">96.0</span><span class="telem-unit">V</span></span>
+      </div>
+      <div class="telem-row">
+        <span class="telem-label">Freno Regenerativo:</span>
+        <span id="telem-regen-status" class="telem-val" style="color: #88a0c0;">INACTIVO</span>
+      </div>
+      <div class="telem-row">
+        <span class="telem-label">Arrastre (Cd·A):</span>
+        <span><span id="telem-cda" class="telem-val">0.118</span><span class="telem-unit">m²</span></span>
+      </div>
+
+      <div class="g-meter-box">
+        <span>Fuerza G Long: <b id="g-long">0.00 g</b></span>
+        <span>G Lateral: <b id="g-lat">0.00 g</b></span>
+      </div>
+      <div class="g-meter-box" style="margin-top: 6px;">
+        <span>Temp Pack: <b id="temp-bat" style="color: #5ac8fa;">27.5 °C</b></span>
+        <span>Temp Motor: <b id="temp-mot" style="color: #ffd60a;">30.0 °C</b></span>
+      </div>
+    </div>
+
+    <!-- Barra Inferior de Controles -->
+    <div class="bottom-control-bar">
+      <button id="btn-instalar" class="btn-action" tabindex="0">➕ Instalar Pieza (F)</button>
+      <button id="btn-pista" class="btn-action pista" tabindex="0">🏎️ Conducir en Pista (T)</button>
+      <button id="btn-camara" class="btn-action" tabindex="0">🎥 Vista Cámara (C)</button>
+      <button id="btn-porton" class="btn-action" tabindex="0">🚪 Portón (E)</button>
+      <button id="btn-desarmar" class="btn-action danger" tabindex="0">🗑️ Desarmar Todo</button>
     </div>
 
     <div id="tooltip-guia" class="tooltip-info">
-      Haz clic en las piezas de la tarima derecha o presiona [F] para ensamblar el carro solar.
+      Presiona [F] para ensamblar piezas o [T] para conducir en el circuito de pruebas con física real.
     </div>
   `;
-  document.body.appendChild(contenedorUI);
+  document.body.appendChild(uiContainer);
 
-  document.getElementById("btn-montar").addEventListener("click", montarSiguiente);
-  document.getElementById("btn-desmontar").addEventListener("click", desmontarUltima);
-  document.getElementById("btn-explosion").addEventListener("click", alternarVistaExplosionada);
+  // Enlaces de eventos
+  document.getElementById("pill-M").addEventListener("click", () => steam.openPhaseModal("M"));
+  document.getElementById("pill-S").addEventListener("click", () => steam.openPhaseModal("S"));
+  document.getElementById("pill-E").addEventListener("click", () => steam.openPhaseModal("E"));
+  document.getElementById("pill-T").addEventListener("click", () => steam.openPhaseModal("T"));
+  document.getElementById("pill-A").addEventListener("click", () => steam.openPhaseModal("A"));
+
+  document.getElementById("btn-toggle-role").addEventListener("click", () => {
+    steam.setTeacherMode(!steam.isTeacherMode);
+    const btn = document.getElementById("btn-toggle-role");
+    if (steam.isTeacherMode) {
+      btn.innerText = "👨‍🏫 Modo Profesor (Lectura)";
+      btn.classList.add("teacher");
+    } else {
+      btn.innerText = "👨‍🎓 Modo Alumno";
+      btn.classList.remove("teacher");
+    }
+  });
+
+  document.getElementById("btn-lang-toggle").addEventListener("click", () => {
+    const cur = getLanguage();
+    const next = cur === "es" ? "en" : "es";
+    setLanguage(next);
+    document.getElementById("btn-lang-toggle").innerText = `🌐 ${next.toUpperCase()}`;
+    actualizarUI();
+  });
+
+  document.getElementById("btn-instalar").addEventListener("click", montarSiguiente);
+  document.getElementById("btn-pista").addEventListener("click", toggleModoPista);
   document.getElementById("btn-camara").addEventListener("click", toggleCamara);
   document.getElementById("btn-porton").addEventListener("click", togglePorton);
+  document.getElementById("btn-desarmar").addEventListener("click", desarmarTodo);
 
   const actualizarUI = () => {
-    const montadas = componentesVehiculo.filter((c) => c.montado);
-    const total = componentesVehiculo.length;
-    const porcentaje = Math.round((montadas.length / total) * 100);
-
-    let masaTotal = 0;
-    let cdA = 0.85;
-    let potenciaPico = 0;
-    let bateriaKwh = 0;
-
-    montadas.forEach((p) => {
-      masaTotal += p.masa;
-      cdA += p.deltaCdA;
-      potenciaPico += p.potenciaSolar;
-      bateriaKwh += p.capacidadBat;
+    const phases = ["M", "S", "E", "T", "A"];
+    phases.forEach(p => {
+      const btn = document.getElementById(`pill-${p}`);
+      if (!btn) return;
+      btn.classList.remove("active", "unlocked", "completed");
+      if (steam.progress[p].completed) btn.classList.add("completed");
+      else if (steam.progress[p].unlocked) btn.classList.add("unlocked");
+      if (steam.currentPhase === p) btn.classList.add("active");
     });
 
-    cdA = Math.max(0.095, cdA);
-
-    let velocidadCrucero = 0;
-    if (potenciaPico > 0 && masaTotal > 0) {
-      const rho = 1.225;
-      const Crr = 0.003;
-      const g = 9.81;
-      let vEst = 15;
-      for (let step = 0; step < 10; step++) {
-        const pReq = 0.5 * cdA * rho * Math.pow(vEst, 3) + Crr * masaTotal * g * vEst;
-        vEst = vEst * Math.pow(potenciaPico / Math.max(pReq, 10), 0.33);
-      }
-      velocidadCrucero = Math.min(130, Math.round(vEst * 3.6));
+    const modeLabel = document.getElementById("ui-mode-label");
+    if (modeLabel) {
+      modeLabel.innerText = enModoPista ? "🏁 Circuito de Pruebas" : "🛠️ Taller Solar 3D";
+      modeLabel.style.color = enModoPista ? "#ff9500" : "#5ac8fa";
     }
 
-    const trackWidth = 1.4;
-    const f = trackWidth / 2;
-    const h = 0.45;
-    const acorr = (f / h).toFixed(2);
-
-    document.getElementById("hud-porcentaje").innerText = `${porcentaje}%`;
-    document.getElementById("hud-barra").style.width = `${porcentaje}%`;
-    document.getElementById("kpi-masa").innerText = masaTotal.toString();
-    document.getElementById("kpi-potencia").innerText = potenciaPico.toString();
-    document.getElementById("kpi-bateria").innerText = bateriaKwh.toFixed(1);
-    document.getElementById("kpi-cda").innerText = cdA.toFixed(3);
-    document.getElementById("kpi-velocidad").innerText = velocidadCrucero.toString();
-    document.getElementById("kpi-vuelco").innerText = montadas.length > 3 ? acorr : "--";
-
-    const btnExplosion = document.getElementById("btn-explosion");
-    if (estadoExplosion) {
-      btnExplosion.classList.add("activo");
-    } else {
-      btnExplosion.classList.remove("activo");
+    const pistaBtn = document.getElementById("btn-pista");
+    if (pistaBtn) {
+      pistaBtn.innerText = enModoPista ? "🛠️ Volver al Taller (T)" : "🏎️ Conducir en Pista (T)";
     }
 
-    const btnCamara = document.getElementById("btn-camara");
-    btnCamara.innerText = modoOrbital ? "🚶 Vista 1ª Persona (C)" : "🔍 Vista Inspección 360° (C)";
-
-    const siguiente = componentesVehiculo.find((c) => !c.montado);
-    const txtFase = document.getElementById("hud-fase-texto");
-    if (siguiente) {
-      txtFase.innerText = `${siguiente.fase}: Siguiente -> ${siguiente.nombre}`;
-    } else {
-      txtFase.innerText = "¡Vehículo Solar 100% Ensamblado y Listo para Pista!";
+    const camBtn = document.getElementById("btn-camara");
+    if (camBtn) {
+      if (modoCamara === "cockpit") camBtn.innerText = "🏎️ Cámara Cockpit (C)";
+      else if (modoCamara === "track") camBtn.innerText = "🎥 Persecución Exterior (C)";
+      else if (modoCamara === "orbit") camBtn.innerText = "🔍 Inspección 360° (C)";
+      else camBtn.innerText = "🚶 1ª Persona Taller (C)";
     }
   };
 
   // ==========================================
-  // 10. BUCLE DE RENDER Y POSICIÓN DINÁMICA
+  // 9. BUCLE DE FÍSICA AVANZADA, AUDIO Y RENDER EN TIEMPO REAL
   // ==========================================
+  let lastTime = performance.now();
+
   scene.registerBeforeRender(() => {
-    pisoExterior.position.x = scene.activeCamera.position.x;
-    pisoExterior.position.z = scene.activeCamera.position.z + 50;
+    const now = performance.now();
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+
+    if (enModoPista) {
+      let throttle = 0;
+      let brake = 0;
+      let steer = 0;
+
+      if (keyState["w"] || keyState["arrowup"]) throttle = 1.0;
+      if (keyState["s"] || keyState["arrowdown"]) brake = 1.0;
+      if (keyState["a"] || keyState["arrowleft"]) steer = -0.36;
+      if (keyState["d"] || keyState["arrowright"]) steer = 0.36;
+      if (keyState[" "]) brake = 1.0;
+
+      // Actualizar simulación física
+      physics.setInputs(throttle, brake, steer);
+      const telem = physics.update(dt);
+
+      // Trasladar y rotar el vehículo en la pista
+      carRoot.position.x = physics.position.x;
+      carRoot.position.z = physics.position.z;
+      carRoot.rotation.y = physics.headingAngle;
+
+      // Suspensión reactiva: Cabeceo (pitch) al acelerar/frenar y Balanceo (roll) en curvas
+      carChassisBody.rotation.x = physics.pitchAngle;
+      carChassisBody.rotation.z = physics.rollAngle;
+
+      // Rotación angular de ruedas
+      const wheelAngSpeed = (physics.velocity / physics.wheelRadius) * dt;
+      componentesVehiculo.forEach(c => {
+        if (c.montado && c.esRueda) {
+          c.nodo.rotation.x += wheelAngSpeed;
+          if (c.ruedaTipo === "delantera") {
+            c.nodo.rotation.y = physics.steeringAngle;
+          }
+        }
+      });
+
+      // Efecto lumínico de freno
+      if (brake > 0.05) {
+        luzFreno.material.emissiveColor = new Color3(1.0, 0.0, 0.0);
+        luzFreno.scaling.set(1.1, 1.2, 1.1);
+      } else {
+        luzFreno.material.emissiveColor = new Color3(0.4, 0.0, 0.0);
+        luzFreno.scaling.set(1.0, 1.0, 1.0);
+      }
+
+      // Partículas de humo al derrapar
+      if (physics.lateralSlip > 0.35 && physics.velocity > 3) {
+        if (!tireSmokePS.isStarted()) tireSmokePS.start();
+      } else {
+        if (tireSmokePS.isStarted()) tireSmokePS.stop();
+      }
+
+      // Actualizar Audio Sintético
+      vehicleAudio.update(telem, physics.lateralSlip);
+
+      // Actualizar Telemetría en HUD
+      document.getElementById("telem-speed").innerText = `${telem.speedKmh.toFixed(1)} km/h`;
+      document.getElementById("telem-motor-pow").innerText = telem.motorPowerW.toString();
+      document.getElementById("telem-motor-rpm").innerText = telem.motorRpm.toString();
+      document.getElementById("telem-solar").innerText = telem.solarPowerW.toString();
+      document.getElementById("telem-soc").innerText = telem.batterySoc.toFixed(1);
+      document.getElementById("telem-voltage").innerText = telem.batteryVoltage.toFixed(1);
+      document.getElementById("telem-cda").innerText = physics.cdA.toFixed(3);
+      document.getElementById("g-long").innerText = `${telem.gForceLong >= 0 ? '+' : ''}${telem.gForceLong.toFixed(2)} g`;
+      document.getElementById("g-lat").innerText = `${telem.gForceLat >= 0 ? '+' : ''}${telem.gForceLat.toFixed(2)} g`;
+      document.getElementById("temp-bat").innerText = `${telem.batteryTempC.toFixed(1)} °C`;
+      document.getElementById("temp-mot").innerText = `${telem.motorTempC.toFixed(1)} °C`;
+
+      // Barra LED de Tacómetro
+      const leds = document.querySelectorAll(".rpm-led");
+      const litCount = Math.round((telem.motorRpm / 4500) * leds.length);
+      leds.forEach((led, idx) => {
+        led.className = "rpm-led";
+        if (idx < litCount) {
+          if (idx < 6) led.classList.add("lit-green");
+          else if (idx < 9) led.classList.add("lit-yellow");
+          else led.classList.add("lit-red");
+        }
+      });
+
+      const regenLabel = document.getElementById("telem-regen-status");
+      if (regenLabel) {
+        if (telem.regenActive) {
+          regenLabel.innerText = `RECUPERANDO (+${telem.regenPowerW} W)`;
+          regenLabel.style.color = "#30d158";
+        } else {
+          regenLabel.innerText = "INACTIVO";
+          regenLabel.style.color = "#88a0c0";
+        }
+      }
+
+      // Verificación de Misión
+      if (physics.missionSuccess) {
+        physics.missionSuccess = false;
+        steam.showMissionModal(true, telem, () => toggleModoPista());
+      } else if (physics.missionFailed) {
+        physics.missionFailed = false;
+        steam.showMissionModal(false, telem, () => toggleModoPista());
+      }
+    }
   });
 
   actualizarUI();
+  hideLoadingScreen();
   return scene;
 };
 

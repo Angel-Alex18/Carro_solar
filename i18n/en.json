@@ -1,0 +1,59 @@
+{
+  "app_title": "3D Solar Vehicle Simulator",
+  "subtitle": "STEAM Methodology & Real Physics Simulation",
+  "loading": "Loading 3D engine and physics components...",
+  "progress": "Progress",
+  "phases": {
+    "M": "Phase M: Mathematics",
+    "S": "Phase S: Science",
+    "E": "Phase E: Engineering",
+    "T": "Phase T: Technology",
+    "A": "Phase A: Arts"
+  },
+  "phases_desc": {
+    "M": "Gear ratio, torque and power balance calculations",
+    "S": "Photovoltaic lab and solar irradiance",
+    "E": "3D part assembly workshop",
+    "T": "BMS programming and regenerative braking",
+    "A": "Aerodynamics and custom livery design"
+  },
+  "buttons": {
+    "assemble": "Install Part",
+    "disassemble_all": "Disassemble All",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "test_track": "Test on Track",
+    "back_workshop": "Back to Workshop",
+    "save": "Save Progress",
+    "teacher_mode": "Teacher Mode (Read-Only)",
+    "student_mode": "Student Mode",
+    "inspect": "Inspect",
+    "calculate": "Calculate",
+    "next_phase": "Next Phase",
+    "prev_phase": "Previous Phase"
+  },
+  "telemetry": {
+    "speed": "Speed",
+    "power": "Motor Power",
+    "solar": "Solar Power",
+    "battery": "Battery (SoC)",
+    "regen": "Regen Braking",
+    "cda": "Aerodynamic Cd·A",
+    "distance": "Distance",
+    "active": "ACTIVE",
+    "idle": "IDLE"
+  },
+  "modals": {
+    "confirm_reset_title": "Confirm Complete Disassembly?",
+    "confirm_reset_text": "This action will remove all assembled parts. Your calculation progress will remain.",
+    "mission_success_title": "Solar Mission Accomplished!",
+    "mission_success_text": "The vehicle demonstrated aerodynamic stability, positive energy balance and motor efficiency.",
+    "mission_fail_title": "Mission Failed",
+    "mission_fail_text": "Battery depleted or the vehicle suffered excessive aerodynamic drag.",
+    "teacher_view_notice": "You are in TEACHER MODE (Read-Only). Assembly modifications are locked."
+  },
+  "accessibility": {
+    "nav_hint": "Use Tab and arrow keys to navigate. Space or Enter to trigger.",
+    "assembled_status": "Assembly status"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "name": "Simulador Educativo de Vehículo Solar de Carreras",
+  "short_name": "CarroSolar3D",
+  "slug": "simulador-carro-solar",
+  "version": "2.0.0",
+  "description": "Simulador interactivo 3D con Babylon.js para diseño, ensamblaje por fases STEAM y telemetría física en tiempo real de un monoplaza solar de alta eficiencia.",
+  "cover": "assets/cover.png",
+  "author": "Angel Muñoz, Alejandro Hernández, Nehemías García, Jese Garza",
+  "steam_mapping": {
+    "M": {
+      "phase": "Matemáticas",
+      "focus": "Cálculo de relación de transmisión (engranes), balance de potencias, área frontal y resistencia a la rodadura",
+      "required_to_unlock": "Fase inicial obligatoria"
+    },
+    "S": {
+      "phase": "Ciencia",
+      "focus": "Física fotovoltaica, ángulo cenital del sol, irradiancia solar espectral y Ley de Ohm aplicada a celdas",
+      "required_to_unlock": "Fase M completada"
+    },
+    "E": {
+      "phase": "Ingeniería",
+      "focus": "Ensamblaje mecánico y mecatrónico 3D guiado, uso de herramientas de seguridad y secuencia estructural",
+      "required_to_unlock": "Fase S completada"
+    },
+    "T": {
+      "phase": "Tecnología",
+      "focus": "Programación y calibración del BMS, control PWM de tracción y algoritmo de freno regenerativo",
+      "required_to_unlock": "Fase E completada"
+    },
+    "A": {
+      "phase": "Arte y Diseño",
+      "focus": "Optimización del coeficiente aerodinámico (Cd*A), ergonomía del habitáculo y personalización estética",
+      "required_to_unlock": "Fase T completada"
+    }
+  },
+  "simulation_modes": [
+    "workshop",
+    "track_test",
+    "teacher_review"
+  ],
+  "license": "MIT"
+}

@@ -1,0 +1,61 @@
+{
+  "title": "Rúbrica de Evaluación de Proyectos - Vehículo Solar",
+  "levels": [
+    "Inicial (1)",
+    "Básico (2)",
+    "Autónomo (3)",
+    "Experto (4)"
+  ],
+  "criteria": [
+    {
+      "area": "Fase M - Matemáticas y Dimensionamiento",
+      "weight_pct": 20,
+      "levels": {
+        "1": "No realiza los cálculos de torque ni engranajes; valores aleatorios.",
+        "2": "Aplica relaciones de engranajes pero con errores en el balance de potencia resistiva.",
+        "3": "Calcula correctamente la relación de transmisión y velocidad teórica con margen de error < 10%.",
+        "4": "Optimiza la curva par-velocidad y justifica analíticamente el punto de operación de máxima eficiencia."
+      }
+    },
+    {
+      "area": "Fase S - Ciencia Fotovoltaica",
+      "weight_pct": 20,
+      "levels": {
+        "1": "Desconoce el impacto del ángulo solar y la temperatura sobre la generación.",
+        "2": "Identifica la relación directa de irradiancia pero omite pérdidas térmicas.",
+        "3": "Modela el comportamiento de potencia en función de la posición cenital del sol.",
+        "4": "Demuestra dominio completo de la curva MPPT, ángulo óptimo y balance energético horario."
+      }
+    },
+    {
+      "area": "Fase E - Ingeniería y Ensamblaje",
+      "weight_pct": 25,
+      "levels": {
+        "1": "Omite elementos estructurales y de seguridad (arnés, fusibles, EPP).",
+        "2": "Ensambla el vehículo en orden arbitrario sin validar compatibilidad.",
+        "3": "Completa el 100% de los ensambles siguiendo la secuencia técnica y herramientas correctas.",
+        "4": "Ensambla con cero defectos, tiempo óptimo y riguroso protocolo de seguridad en alta tensión."
+      }
+    },
+    {
+      "area": "Fase T - Tecnología y Telemetría",
+      "weight_pct": 20,
+      "levels": {
+        "1": "BMS sin calibrar; no recupera energía en frenado.",
+        "2": "Configura protecciones del BMS básicas sin integración de freno regenerativo.",
+        "3": "Ajusta umbrales de tensión de corte y activa la regeneración cinética efectiva.",
+        "4": "Optimiza la curva de recarga, recupera >15% de energía en desaceleración y analiza telemetría."
+      }
+    },
+    {
+      "area": "Fase A - Arte y Aerodinámica",
+      "weight_pct": 15,
+      "levels": {
+        "1": "Carrocería sin optimización aerodinámica (Cd·A > 0.35 m²).",
+        "2": "Carrocería funcional con perfil convencional y acabado básico.",
+        "3": "Diseño estilizado con Cd·A reducido (< 0.16 m²) y armonía visual.",
+        "4": "Concept car aerodinámico de vanguardia (Cd·A < 0.12 m²), ergonomía y estética de competición."
+      }
+    }
+  ]
+}

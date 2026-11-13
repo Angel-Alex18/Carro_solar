@@ -1,0 +1,36 @@
+{
+  "course_title": "Laboratorio de Ingeniería de Vehículos Solares STEAM",
+  "level": "Educación Superior / Bachillerato Técnico",
+  "competencies": [
+    {
+      "id": "OBJ-M01",
+      "steam_area": "M",
+      "title": "Cálculo de Transmisión y Potencia",
+      "description": "Determinar la relación de reducción óptima entre el motor eléctrico y las ruedas motrices garantizando torque de arranque y velocidad crucero."
+    },
+    {
+      "id": "OBJ-S01",
+      "steam_area": "S",
+      "title": "Balance Fotovoltaico y Radiación Solar",
+      "description": "Analizar la curva I-V y P-V del arreglo solar bajo diversas condiciones de irradiancia y temperatura ambiente."
+    },
+    {
+      "id": "OBJ-E01",
+      "steam_area": "E",
+      "title": "Ensamblaje Mecánico Modular y Seguridad Ocupacional",
+      "description": "Ejecutar la secuencia lógica de ensamble del monocasco, tren motriz y sistema de seguridad usando herramientas adecuadas (EPP, torquímetro)."
+    },
+    {
+      "id": "OBJ-T01",
+      "steam_area": "T",
+      "title": "Programación de BMS y Freno Regenerativo",
+      "description": "Configurar los parámetros de umbral de corte del BMS y la tasa de regeneración cinética en deceleración."
+    },
+    {
+      "id": "OBJ-A01",
+      "steam_area": "A",
+      "title": "Diseño Aerodinámico y Síntesis Visual",
+      "description": "Explorar variaciones de carrocería (bullet, catamaran) evaluando su impacto estético y coeficiente aerodinámico efectivo."
+    }
+  ]
+}
